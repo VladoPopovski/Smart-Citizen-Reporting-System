@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+sqlalchemy>=2.0
+psycopg[binary]
+pydantic[email]>=2.0
+pydantic-settings>=2.0
+python-dotenv>=1.0
+python-multipart
+

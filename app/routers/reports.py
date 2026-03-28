@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.report import ReportCreate, ReportRead
+from app.schemas.report import ReportCreate, ReportRead, ReportUpdate
 from app.schemas.user import CurrentUser, UserRole
 from app.services import report_service
 from app.utils.dependencies import get_current_user, require_roles
@@ -16,12 +16,7 @@ def create_report(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.citizen, UserRole.admin)),
 ) -> ReportRead:
-    """
-    Create a citizen report.
-
-    Structure only: no DB writes are performed in this template.
-    """
-
+    """Create a citizen report. Only citizens and admins may submit reports."""
     return report_service.create_report(db, report_in=report_in, current_user=current_user)
 
 
@@ -33,11 +28,9 @@ def list_reports(
     """
     List reports.
 
-    In a real system this would filter by role:
-    - citizens: only their own reports
-    - officers/admins: broader access
+    - Citizens see only their own reports.
+    - Officers and admins see all reports.
     """
-
     return report_service.list_reports(db, current_user=current_user)
 
 
@@ -47,7 +40,31 @@ def get_report(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> ReportRead:
-    """Fetch a single report by ID (structure only)."""
-
+    """Get a single report by ID. Citizens can only fetch their own."""
     return report_service.get_report(db, report_id=report_id, current_user=current_user)
 
+
+@router.patch("/{report_id}", response_model=ReportRead)
+def update_report(
+    report_id: int,
+    report_in: ReportUpdate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ReportRead:
+    """
+    Update a report.
+
+    - Citizens can update description/location of their own reports only.
+    - Officers and admins can update any report, including category and status.
+    """
+    return report_service.update_report(db, report_id=report_id, report_in=report_in, current_user=current_user)
+
+
+@router.delete("/{report_id}", status_code=204)
+def delete_report(
+    report_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> None:
+    """Delete a report. Citizens can only delete their own; admins can delete any."""
+    report_service.delete_report(db, report_id=report_id, current_user=current_user)

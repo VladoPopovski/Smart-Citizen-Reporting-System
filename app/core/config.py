@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     # - In production you would validate JWT signatures using Supabase JWKS.
     # - This template intentionally *does not* integrate Supabase SDKs.
     supabase_mock_verify: bool = True
+    dev_skip_auth: bool = False
 
 
 @lru_cache

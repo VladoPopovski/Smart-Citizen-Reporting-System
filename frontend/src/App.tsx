@@ -8,7 +8,7 @@ import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
 import HomePage from "./pages/HomePage";
 import MyComplaintsPage from "./pages/MyComplaintsPage";
-
+import NewComplaintPage from "./pages/NewComplaintPage";
 import DashboardPage from "./pages/DashboardPage";
 import AssignedComplaintsPage from "./pages/AssignedComplaintsPage";
 import ManageComplaintsPage from "./pages/ManageComplaintsPage";
@@ -37,6 +37,7 @@ function AppRoutes() {
         <>
           <Route path="/" element={<HomePage />} />
           <Route path="/my-complaints" element={<MyComplaintsPage />} />
+          <Route path="/new-complaint" element={<NewComplaintPage />} />
 
         </>
       )}

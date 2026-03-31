@@ -46,11 +46,7 @@ class Report(Base):
         server_default=func.now(),
         nullable=False,
     )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-    )
+
     user: Mapped[User] = relationship(back_populates="reports")
     category: Mapped[Category | None] = relationship(back_populates="reports")
     status: Mapped[Status | None] = relationship(back_populates="reports")

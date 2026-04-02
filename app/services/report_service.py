@@ -9,16 +9,45 @@ from app.schemas.report import ReportCreate, ReportRead, ReportUpdate
 from app.schemas.user import CurrentUser, UserRole
 from app.services.ai_service import classify_text
 
+import logging
+
+from app.models.category import Category  # needed for DB lookup
+
+logger = logging.getLogger(__name__)
+
 
 def create_report(db: Session, *, report_in: ReportCreate, current_user: CurrentUser) -> ReportRead:
-    """Persist a new report and return it."""
-    _ = classify_text(report_in.description)  # reserved for category assignment
+    """Persist a new report, auto-assign category via AI, and return it."""
 
+    #  Fetch all category names from DB for classifier's choices
+    categories = db.scalars(select(Category)).all()
+    candidate_labels = [c.name for c in categories]
+
+    #  Match category
+    predicted_label = classify_text(report_in.description, candidate_labels)
+
+    #  resolve the predicted name -> category_id (or None if no match / AI failed)
+    category_id: int | None = None
+    if predicted_label:
+        matched = db.scalars(
+            select(Category).where(Category.name == predicted_label)
+        ).first()
+        if matched:
+            category_id = matched.id
+            logger.info("Auto-assigned category_id=%d ('%s')", category_id, predicted_label)
+        else:
+            # guard
+            logger.warning("No DB match for predicted label '%s' — category_id left NULL.", predicted_label)
+    else:
+        logger.warning("Classification returned None — category_id left NULL.")
+
+    #  Save report with resolved category_id (may be NULL)
     report = Report(
         description=report_in.description,
         latitude=report_in.latitude,
         longitude=report_in.longitude,
         user_id=current_user.id,
+        category_id=category_id,
     )
     db.add(report)
     db.commit()

@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     ai_hf_revision: str | None = None
     ai_hf_device: int = -1
 
+    # OpenAI fallback (only used when HuggingFace fails / returns None)
+    ai_openai_fallback_enabled: bool = False
+    ai_openai_model: str = "gpt-4o-mini"
+    ai_openai_timeout_seconds: float = 15.0
+    openai_api_key: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

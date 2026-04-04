@@ -10,6 +10,7 @@ surprise model downloads during test runs.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 
@@ -63,6 +64,70 @@ def warmup_model() -> bool:
         return False
 
 
+def _classify_text_openai(text: str, candidate_labels: list[str]) -> str | None:
+    """
+    OpenAI fallback classifier.
+
+    Requires `OPENAI_API_KEY` to be available in the environment.
+    """
+    settings = get_settings()
+    if not settings.ai_openai_fallback_enabled:
+        return None
+    if not settings.openai_api_key:
+        return None
+
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=settings.openai_api_key, timeout=settings.ai_openai_timeout_seconds)
+        response = client.responses.create(
+            model=settings.ai_openai_model,
+            input=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You classify citizen reports into exactly one category label. "
+                        "Return only a JSON object that matches the schema."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Report description:\n{text}\n\n"
+                        "Choose the single best label from:\n"
+                        + "\n".join(f"- {label}" for label in candidate_labels)
+                    ),
+                },
+            ],
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "report_category",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string", "enum": candidate_labels},
+                        },
+                        "required": ["label"],
+                        "additionalProperties": False,
+                    },
+                    "strict": True,
+                }
+            },
+        )
+
+        parsed = json.loads(response.output_text)
+        label = parsed.get("label")
+        if isinstance(label, str) and label in candidate_labels:
+            return label
+
+        logger.warning("OpenAI fallback returned unexpected label=%r", label)
+        return None
+    except Exception:
+        logger.exception("OpenAI fallback classification failed.")
+        return None
+
+
 def classify_text(
     text: str,
     candidate_labels: list[str],
@@ -84,25 +149,30 @@ def classify_text(
         logger.warning("classify_text called with empty text or no candidate labels.")
         return None
 
-    try:
-        settings = get_settings()
-        if not settings.ai_enabled:
-            return None
+    settings = get_settings()
+    if not settings.ai_enabled:
+        return None
 
+    top_label = None
+    try:
         classifier = _get_classifier()
         result = classifier(text, candidate_labels)
         # result = {"labels": ["Roads", "Waste", ...], "scores": [0.91, 0.05, ...], ...}
-        top_label: str = result["labels"][0]
+        top_label = result["labels"][0]
         top_score: float = result["scores"][0]
         logger.info("Classified text as '%s' (confidence %.2f)", top_label, top_score)
         if min_confidence is not None and top_score < min_confidence:
             logger.info(
-                "Classification below min_confidence (%.2f < %.2f) — returning None.",
+                "Classification below min_confidence (%.2f < %.2f) - trying OpenAI fallback.",
                 top_score,
                 min_confidence,
             )
-            return None
-        return top_label
+            top_label = None
     except Exception:
-        logger.exception("Classification failed — returning None.")
-        return None
+        logger.exception("HuggingFace classification failed - trying OpenAI fallback.")
+        top_label = None
+
+    if top_label is not None:
+        return top_label
+
+    return _classify_text_openai(text, candidate_labels)

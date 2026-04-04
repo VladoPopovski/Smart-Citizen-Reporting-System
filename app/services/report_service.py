@@ -4,6 +4,8 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
+from app.models.category import Category
 from app.models.report import Report
 from app.schemas.report import ReportCreate, ReportRead, ReportUpdate
 from app.schemas.user import CurrentUser, UserRole
@@ -11,35 +13,68 @@ from app.services.ai_service import classify_text
 
 import logging
 
-from app.models.category import Category  # needed for DB lookup
-
 logger = logging.getLogger(__name__)
 
 
+def _classifier_label_for_category(category_name: str) -> str:
+    # Help the zero-shot model understand what "Safety" means in this app.
+    # Keeping other category labels untouched preserves existing behavior.
+    if category_name.strip().lower() == "safety":
+        return "Safety (accidents and hazards)"
+    return category_name
+
+
 def create_report(db: Session, *, report_in: ReportCreate, current_user: CurrentUser) -> ReportRead:
-    """Persist a new report, auto-assign category via AI, and return it."""
+    """Persist a new report, auto-assign category (optional), and return it."""
+    settings = get_settings()
 
     #  Fetch all category names from DB for classifier's choices
     categories = db.scalars(select(Category)).all()
-    candidate_labels = [c.name for c in categories]
+    category_name_to_id = {c.name: c.id for c in categories}
+    label_to_id = {_classifier_label_for_category(name): cid for name, cid in category_name_to_id.items()}
+    candidate_labels = list(label_to_id.keys())
 
-    #  Match category
-    predicted_label = classify_text(report_in.description, candidate_labels)
-
-    #  resolve the predicted name -> category_id (or None if no match / AI failed)
     category_id: int | None = None
+
+    # Match category via AI (if enabled)
+    predicted_label = None
+    if settings.ai_enabled:
+        predicted_label = classify_text(
+            report_in.description,
+            candidate_labels,
+            min_confidence=settings.ai_min_confidence,
+        )
+
     if predicted_label:
-        matched = db.scalars(
-            select(Category).where(Category.name == predicted_label)
-        ).first()
-        if matched:
-            category_id = matched.id
+        matched_id = label_to_id.get(predicted_label)
+        if matched_id is not None:
+            category_id = matched_id
             logger.info("Auto-assigned category_id=%d ('%s')", category_id, predicted_label)
         else:
-            # guard
-            logger.warning("No DB match for predicted label '%s' — category_id left NULL.", predicted_label)
+            # Guard: predicted label should always be one of candidate_labels.
+            logger.warning(
+                "No DB match for predicted label '%s' — will fall back.",
+                predicted_label,
+            )
     else:
-        logger.warning("Classification returned None — category_id left NULL.")
+        if settings.ai_enabled:
+            logger.warning("Classification returned None — falling back to default category.")
+
+    # Fallback category (default: "Other")
+    if settings.ai_enabled and category_id is None and settings.ai_default_category_name:
+        fallback_id = category_name_to_id.get(settings.ai_default_category_name)
+        if fallback_id is not None:
+            category_id = fallback_id
+            logger.info(
+                "Applied fallback category_id=%d ('%s')",
+                category_id,
+                settings.ai_default_category_name,
+            )
+        else:
+            logger.warning(
+                "Fallback category '%s' not found in DB — category_id left NULL.",
+                settings.ai_default_category_name,
+            )
 
     #  Save report with resolved category_id (may be NULL)
     report = Report(

@@ -25,11 +25,21 @@ class History(Base):
     __tablename__ = "history"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    report_id: Mapped[int] = mapped_column(ForeignKey("reports.id", ondelete="CASCADE"), nullable=False)
+
+    report_id: Mapped[int] = mapped_column(
+        ForeignKey("reports.id", ondelete="CASCADE"), nullable=False
+    )
+
+    old_status_id: Mapped[int | None] = mapped_column(
+        ForeignKey("statuses.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     status_id: Mapped[int | None] = mapped_column(
         ForeignKey("statuses.id", ondelete="SET NULL"),
         nullable=True,
     )
+
     changed_by_user_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
@@ -43,5 +53,14 @@ class History(Base):
     )
 
     report: Mapped[Report] = relationship(back_populates="history_entries")
-    status: Mapped[Status | None] = relationship(back_populates="history_entries")
+
+    status: Mapped[Status | None] = relationship(
+        back_populates="history_entries",
+        foreign_keys="History.status_id",
+    )
+
+    old_status: Mapped[Status | None] = relationship(
+        foreign_keys="History.old_status_id",
+    )
+
     changed_by_user: Mapped[User | None] = relationship()

@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+import logging
+from uuid import UUID
+
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models.category import Category
+from app.models.history import History
 from app.models.report import Report
-from app.schemas.report import ReportCreate, ReportRead, ReportUpdate
+from app.schemas.report import ReportCreate, ReportRead, ReportUpdate, StatusUpdate
 from app.schemas.user import CurrentUser, UserRole
 from app.services.ai_service import classify_text
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +109,21 @@ def _get_or_404(db: Session, report_id: int) -> Report:
     return report
 
 
+def _record_status_history(
+    db: Session,
+    report: Report,
+    new_status_id: int | None,
+    changed_by_user_id: UUID,
+) -> None:
+    """Insert a History row capturing the old and new status of a report."""
+    db.add(History(
+        report_id=report.id,
+        old_status_id=report.status_id,
+        status_id=new_status_id,
+        changed_by_user_id=changed_by_user_id,
+    ))
+
+
 def get_report(db: Session, *, report_id: int, current_user: CurrentUser) -> ReportRead:
     """Return a single report. Citizens can only fetch their own."""
     report = _get_or_404(db, report_id)
@@ -130,9 +147,28 @@ def update_report(
         update_data.pop("category_id", None)
         update_data.pop("status_id", None)
 
+    new_status_id = update_data.get("status_id", report.status_id)
+    if new_status_id != report.status_id:
+        _record_status_history(db, report, new_status_id, current_user.id)
+
     for field, value in update_data.items():
         setattr(report, field, value)
 
+    db.commit()
+    db.refresh(report)
+    return ReportRead.model_validate(report)
+
+
+def update_status(
+    db: Session, *, report_id: int, status_in: StatusUpdate, current_user: CurrentUser
+) -> ReportRead:
+    """Change a report's status. Officers and admins only. Always logs history."""
+    report = _get_or_404(db, report_id)
+
+    if status_in.status_id != report.status_id:
+        _record_status_history(db, report, status_in.status_id, current_user.id)
+
+    report.status_id = status_in.status_id
     db.commit()
     db.refresh(report)
     return ReportRead.model_validate(report)
@@ -142,7 +178,8 @@ def delete_report(db: Session, *, report_id: int, current_user: CurrentUser) -> 
     """Delete a report. Citizens can only delete their own; admins can delete any."""
     report = _get_or_404(db, report_id)
     is_owner = report.user_id == current_user.id
-    if current_user.role != UserRole.admin and not (current_user.role == UserRole.citizen and is_owner):
+    allowed = current_user.role == UserRole.admin or (current_user.role == UserRole.citizen and is_owner)
+    if not allowed:
         raise HTTPException(status_code=403, detail="Not allowed")
 
     db.delete(report)

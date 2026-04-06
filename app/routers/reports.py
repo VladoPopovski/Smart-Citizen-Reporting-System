@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.report import ReportCreate, ReportRead, ReportUpdate
+from app.schemas.report import ReportCreate, ReportRead, ReportUpdate, StatusUpdate
 from app.schemas.user import CurrentUser, UserRole
 from app.services import report_service
 from app.utils.dependencies import get_current_user, require_roles
@@ -58,6 +58,17 @@ def update_report(
     - Officers and admins can update any report, including category and status.
     """
     return report_service.update_report(db, report_id=report_id, report_in=report_in, current_user=current_user)
+
+
+@router.patch("/{report_id}/status", response_model=ReportRead)
+def update_report_status(
+    report_id: int,
+    status_in: StatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin)),
+) -> ReportRead:
+    """Change a report's status. Officers and admins only. Always logs history."""
+    return report_service.update_status(db, report_id=report_id, status_in=status_in, current_user=current_user)
 
 
 @router.delete("/{report_id}", status_code=204)

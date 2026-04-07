@@ -26,6 +26,25 @@ class Settings(BaseSettings):
     supabase_mock_verify: bool = True
     dev_skip_auth: bool = False
 
+    # --- AI / ML ---
+    # Auto-assign category_id on report creation (when enabled).
+    ai_enabled: bool = True
+    ai_preload_on_startup: bool = False
+    # 0 disables the threshold (always accept the top label).
+    ai_min_confidence: float = 0.0
+    ai_default_category_name: str = "Other"
+
+    # HuggingFace zero-shot classification defaults
+    ai_hf_model: str = "facebook/bart-large-mnli"
+    ai_hf_revision: str | None = None
+    ai_hf_device: int = -1
+
+    # OpenAI fallback (only used when HuggingFace fails / returns None)
+    ai_openai_fallback_enabled: bool = False
+    ai_openai_model: str = "gpt-4o-mini"
+    ai_openai_timeout_seconds: float = 15.0
+    openai_api_key: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

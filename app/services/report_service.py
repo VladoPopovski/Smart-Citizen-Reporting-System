@@ -164,3 +164,73 @@ def delete_report(db: Session, *, report_id: int, current_user: CurrentUser) -> 
 
     db.delete(report)
     db.commit()
+
+
+#  Функциите update_report и delete_report треба да се изменат со цел да се усогласат со барањата за правилна контрола на пристап (RBAC)
+#  и следење на промените во системот. Во постоечката имплементација на update_report, иако е овозможено ажурирање на извештајот, недостига механизам за евидентирање на промените на статусот.
+#  Ова значи дека кога ќе се промени status_id, системот не чува информација за тоа кој ја направил промената и кога се случила. Со новата верзија се воведува зачувување на овие промени во посебна History табела,
+#  со што се овозможува следење на историјата на статусите и се подобрува транспарентноста на системот. Ова е особено важно за audit trail и за исполнување на барањата на задачата.
+#
+# Дополнително, во функцијата delete_report постоеше логичка грешка поврзана со улогата officer. Иако според барањата officer треба да има дозвола да брише извештаи,
+# во старата имплементација оваа улога не беше правилно обработена и секогаш добиваше забрана (403). Со новата логика, и admin и officer можат да бришат било кој извештај, додека citizen може да брише само свои извештаи.
+# На овој начин се обезбедува правилна распределба на привилегиите според улогите.
+#
+# Овие измени се неопходни не само за да се подобри функционалноста, туку и за да се исполнат тест сценаријата, каде што се проверува дали правилно се применуваат правилата за пристап и дали се евидентираат промените на статусот.
+# def update_report(
+#     db: Session, *, report_id: int, report_in: ReportUpdate, current_user: CurrentUser
+# ) -> ReportRead:
+#     """
+#     Update a report. Citizens can only update their own; officers/admins can update any.
+#
+#     FIX: Creates a History record whenever status_id changes.
+#     """
+#     report = _get_or_404(db, report_id)
+#     if current_user.role == UserRole.citizen and report.user_id != current_user.id:
+#         raise HTTPException(status_code=403, detail="Not allowed")
+#
+#     update_data = report_in.model_dump(exclude_unset=True)
+#
+#     # Citizens may not change category or status
+#     if current_user.role == UserRole.citizen:
+#         update_data.pop("category_id", None)
+#         update_data.pop("status_id", None)
+#
+#     # ✅ FIX: Track status change in History table
+#     new_status_id = update_data.get("status_id")
+#     if new_status_id is not None and new_status_id != report.status_id:
+#         history_entry = History(
+#             report_id=report.id,
+#             status_id=new_status_id,
+#             changed_by_user_id=current_user.id,
+#         )
+#         db.add(history_entry)
+#
+#     for field, value in update_data.items():
+#         setattr(report, field, value)
+#
+#     db.commit()
+#     db.refresh(report)
+#     return ReportRead.model_validate(report)
+#
+#
+# def delete_report(db: Session, *, report_id: int, current_user: CurrentUser) -> None:
+#     """
+#     Delete a report.
+#
+#     FIX: Officers can now delete any report (same as admins).
+#     Original bug: officer role fell through the condition and always got 403.
+#     """
+#     report = _get_or_404(db, report_id)
+#     is_owner = report.user_id == current_user.id
+#
+#     # Admin/officer → can delete any report
+#     # Citizen → only their own
+#     if current_user.role in (UserRole.admin, UserRole.officer):
+#         pass  # allowed
+#     elif current_user.role == UserRole.citizen and is_owner:
+#         pass  # allowed
+#     else:
+#         raise HTTPException(status_code=403, detail="Not allowed")
+#
+#     db.delete(report)
+#     db.commit()

@@ -10,6 +10,12 @@ from app.services import user_service
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
+DEV_USER = CurrentUser(
+    id=UUID("12345678-1234-1234-1234-123456789012"),
+    email="dev@example.com",
+    role=UserRole.admin,
+)
+
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),

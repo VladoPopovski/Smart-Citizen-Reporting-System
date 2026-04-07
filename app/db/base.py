@@ -1,9 +1,4 @@
-from sqlalchemy.orm import DeclarativeBase
-
-
-class Base(DeclarativeBase):
-    """Base class for all SQLAlchemy models."""
-
+from app.db.base_class import Base  # noqa: F401
 
 # Import all models so SQLAlchemy registers them on the metadata.
 # This is useful for migrations (e.g., Alembic) and for creating tables in dev.

@@ -16,6 +16,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _normalize_category_key(value: str) -> str:
+    return value.strip().casefold()
+
+
 def _classifier_label_for_category(category_name: str) -> str:
     # Help the zero-shot model understand what "Safety" means in this app.
     # Keeping other category labels untouched preserves existing behavior.
@@ -30,39 +34,52 @@ def create_report(db: Session, *, report_in: ReportCreate, current_user: Current
 
     #  Fetch all category names from DB for classifier's choices
     categories = db.scalars(select(Category)).all()
-    category_name_to_id = {c.name: c.id for c in categories}
-    label_to_id = {_classifier_label_for_category(name): cid for name, cid in category_name_to_id.items()}
-    candidate_labels = list(label_to_id.keys())
+    category_name_key_to_id = {_normalize_category_key(c.name): c.id for c in categories}
+    candidate_labels = [_classifier_label_for_category(c.name) for c in categories]
+    classifier_label_key_to_id = {
+        _normalize_category_key(_classifier_label_for_category(c.name)): c.id for c in categories
+    }
 
     category_id: int | None = None
 
     # Match category via AI (if enabled)
     predicted_label = None
     if settings.ai_enabled:
-        predicted_label = classify_text(
-            report_in.description,
-            candidate_labels,
-            min_confidence=settings.ai_min_confidence,
-        )
+        try:
+            predicted_label = classify_text(
+                report_in.description,
+                candidate_labels,
+                min_confidence=settings.ai_min_confidence,
+            )
+        except Exception:
+            logger.exception("AI classification failed.")
+            predicted_label = None
 
     if predicted_label:
-        matched_id = label_to_id.get(predicted_label)
-        if matched_id is not None:
-            category_id = matched_id
+        predicted_key = _normalize_category_key(predicted_label)
+
+        # Prefer matching against DB category names, but also allow matching against
+        # classifier-facing labels (e.g., "Safety (accidents and hazards)").
+        category_id = category_name_key_to_id.get(predicted_key)
+        if category_id is None:
+            category_id = classifier_label_key_to_id.get(predicted_key)
+
+        if category_id is not None:
             logger.info("Auto-assigned category_id=%d ('%s')", category_id, predicted_label)
         else:
-            # Guard: predicted label should always be one of candidate_labels.
-            logger.warning(
-                "No DB match for predicted label '%s' — will fall back.",
-                predicted_label,
-            )
+            logger.warning("AI classification label not matched to DB category: %s", predicted_label)
     else:
         if settings.ai_enabled:
             logger.warning("Classification returned None — falling back to default category.")
 
     # Fallback category (default: "Other")
-    if settings.ai_enabled and category_id is None and settings.ai_default_category_name:
-        fallback_id = category_name_to_id.get(settings.ai_default_category_name)
+    if (
+        settings.ai_enabled
+        and predicted_label is None
+        and category_id is None
+        and settings.ai_default_category_name
+    ):
+        fallback_id = category_name_key_to_id.get(_normalize_category_key(settings.ai_default_category_name))
         if fallback_id is not None:
             category_id = fallback_id
             logger.info(

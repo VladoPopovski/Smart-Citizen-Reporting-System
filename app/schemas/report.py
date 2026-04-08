@@ -27,6 +27,10 @@ class ReportUpdate(BaseModel):
     status_id: int | None = None
 
 
+class StatusUpdate(BaseModel):
+    status_id: int
+
+
 class ReportRead(BaseModel):
     """Output schema for report responses."""
 

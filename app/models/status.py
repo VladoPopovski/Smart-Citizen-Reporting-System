@@ -16,8 +16,14 @@ class Status(Base):
     __tablename__ = "statuses"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+
+    name: Mapped[str] = mapped_column(
+        String(50), unique=True, index=True, nullable=False
+    )
 
     reports: Mapped[list[Report]] = relationship(back_populates="status")
-    history_entries: Mapped[list[History]] = relationship(back_populates="status")
 
+    history_entries: Mapped[list[History]] = relationship(
+        back_populates="status",
+        foreign_keys="History.status_id",
+    )

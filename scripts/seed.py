@@ -32,27 +32,6 @@ USERS = [
     User(id=ADMIN_ID, email="admin@example.com", role=UserRole.admin),
 ]
 
-REPORTS = [
-    Report(
-        description="Pothole on Main Street near the bus stop.",
-        user_id=CITIZEN_ID,
-        latitude=41.9981,
-        longitude=21.4254,
-    ),
-    Report(
-        description="Broken street light on Oak Avenue.",
-        user_id=CITIZEN_ID,
-        latitude=41.9975,
-        longitude=21.4261,
-    ),
-    Report(
-        description="Graffiti on the wall of the community centre.",
-        user_id=OFFICER_ID,
-        latitude=41.9990,
-        longitude=21.4270,
-    ),
-]
-
 CATEGORIES = [
     {"id": 1, "name": "Infrastructure"},
     {"id": 2, "name": "Environment"},
@@ -67,6 +46,33 @@ STATUSES = [
     {"id": 4, "name": "Rejected"},
     {"id": 5, "name": "Closed"},
     {"id": 6, "name": "Pending"},
+]
+
+REPORTS = [
+    Report(
+        description="Pothole on Main Street near the bus stop.",
+        user_id=CITIZEN_ID,
+        latitude=41.9981,
+        longitude=21.4254,
+        category_id=1,   # Infrastructure
+        status_id=1,     # Submitted
+    ),
+    Report(
+        description="Broken street light on Oak Avenue.",
+        user_id=CITIZEN_ID,
+        latitude=41.9975,
+        longitude=21.4261,
+        category_id=1,   # Infrastructure
+        status_id=2,     # In Progress
+    ),
+    Report(
+        description="Graffiti on the wall of the community centre.",
+        user_id=OFFICER_ID,
+        latitude=41.9990,
+        longitude=21.4270,
+        category_id=3,   # Safety
+        status_id=3,     # Resolved
+    ),
 ]
 
 
@@ -91,14 +97,6 @@ def seed() -> None:
         else:
             print("Users already seeded.")
 
-        # ---------------- REPORTS ----------------
-        if db.scalar(select(func.count()).select_from(Report)) == 0:
-            db.add_all(REPORTS)
-            db.commit()
-            print(f"Inserted {len(REPORTS)} report(s).")
-        else:
-            print("Reports already seeded.")
-
         # ---------------- CATEGORIES ----------------
         if db.scalar(select(func.count()).select_from(Category)) == 0:
             db.add_all([Category(**c) for c in CATEGORIES])
@@ -115,7 +113,15 @@ def seed() -> None:
         else:
             print("Statuses already seeded.")
 
-    print("✅ Done seeding!")
+        # ---------------- REPORTS ----------------
+        if db.scalar(select(func.count()).select_from(Report)) == 0:
+            db.add_all(REPORTS)
+            db.commit()
+            print(f"Inserted {len(REPORTS)} report(s).")
+        else:
+            print("Reports already seeded.")
+
+    print("Done seeding!")
 
 
 # ---------------------------------------------------------------------------

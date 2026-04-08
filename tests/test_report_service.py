@@ -13,6 +13,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
+import app.db.base
 from app.schemas.user import CurrentUser, UserRole
 from app.services import report_service
 
@@ -189,6 +190,72 @@ class TestDeleteReport:
         admin = _make_user(UserRole.admin)
         with pytest.raises(HTTPException) as exc:
             report_service.delete_report(_db(None), report_id=99, current_user=admin)
+        assert exc.value.status_code == 404
+
+
+class TestUpdateStatus:
+    def _status_in(self, status_id: int) -> MagicMock:
+        m = MagicMock()
+        m.status_id = status_id
+        return m
+
+    def test_officer_changes_status_records_history(self):
+        officer = _make_user(UserRole.officer)
+        report = _make_report(user_id=uuid4())
+        report.status_id = 1
+        db = _db(report)
+
+        report_service.update_status(db, report_id=1, status_in=self._status_in(2), current_user=officer)
+
+        db.add.assert_called_once()
+        added = db.add.call_args[0][0]
+        assert added.old_status_id == 1
+        assert added.status_id == 2
+        assert added.changed_by_user_id == officer.id
+        assert report.status_id == 2
+        db.commit.assert_called_once()
+
+    def test_no_history_when_status_unchanged(self):
+        officer = _make_user(UserRole.officer)
+        report = _make_report(user_id=uuid4())
+        report.status_id = 3
+        db = _db(report)
+
+        report_service.update_status(db, report_id=1, status_in=self._status_in(3), current_user=officer)
+
+        db.add.assert_not_called()
+
+    def test_update_report_records_history_on_status_change(self):
+        officer = _make_user(UserRole.officer)
+        report = _make_report(user_id=uuid4())
+        report.status_id = 1
+        db = _db(report)
+
+        report_service.update_report(
+            db, report_id=1, report_in=_report_in(status_id=2), current_user=officer
+        )
+
+        db.add.assert_called_once()
+        added = db.add.call_args[0][0]
+        assert added.old_status_id == 1
+        assert added.status_id == 2
+
+    def test_update_report_no_history_when_status_not_in_payload(self):
+        officer = _make_user(UserRole.officer)
+        report = _make_report(user_id=uuid4())
+        report.status_id = 1
+        db = _db(report)
+
+        report_service.update_report(
+            db, report_id=1, report_in=_report_in(description="New text"), current_user=officer
+        )
+
+        db.add.assert_not_called()
+
+    def test_missing_report_raises_404(self):
+        officer = _make_user(UserRole.officer)
+        with pytest.raises(HTTPException) as exc:
+            report_service.update_status(_db(None), report_id=99, status_in=self._status_in(1), current_user=officer)
         assert exc.value.status_code == 404
 
 

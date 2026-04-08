@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from  datetime import datetime, timezone
+
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -10,6 +12,8 @@ from app.models.report import Report
 from app.schemas.report import ReportCreate, ReportRead, ReportUpdate
 from app.schemas.user import CurrentUser, UserRole
 from app.services.ai_service import classify_text
+from app.utils.duplicate_detection import check_duplicate
+
 
 import logging
 
@@ -94,12 +98,44 @@ def create_report(db: Session, *, report_in: ReportCreate, current_user: Current
             )
 
     #  Save report with resolved category_id (may be NULL)
+    # old
+
+    # report = Report(
+    #     description=report_in.description,
+    #     latitude=report_in.latitude,
+    #     longitude=report_in.longitude,
+    #     user_id=current_user.id,
+    #     category_id=category_id,
+    # )
+    # db.add(report)
+    # db.commit()
+    # db.refresh(report)
+    # return ReportRead.model_validate(report)
+
+    # AFTER (with duplicate detection):
+    now = datetime.now(tz=timezone.utc)
+
+    possible_duplicate_of = check_duplicate(
+        description=report_in.description,
+        latitude=report_in.latitude,
+        longitude=report_in.longitude,
+        created_at=now,
+        db=db,
+    )
+
+    if possible_duplicate_of is not None:
+        logger.warning(
+            "New report may be a duplicate of report id=%d — saving with flag set.",
+            possible_duplicate_of,
+        )
+
     report = Report(
         description=report_in.description,
         latitude=report_in.latitude,
         longitude=report_in.longitude,
         user_id=current_user.id,
         category_id=category_id,
+        possible_duplicate_of=possible_duplicate_of,
     )
     db.add(report)
     db.commit()

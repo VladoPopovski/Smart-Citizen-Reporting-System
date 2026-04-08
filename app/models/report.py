@@ -4,10 +4,12 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import DateTime, Float, ForeignKey, Text, Uuid, func
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base_class import Base
+
+
 
 if TYPE_CHECKING:
     from app.models.attachment import Attachment
@@ -45,6 +47,12 @@ class Report(Base):
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
+    )
+
+    possible_duplicate_of: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("reports.id", ondelete="SET NULL"),
+        nullable=True,
     )
 
     user: Mapped[User] = relationship(back_populates="reports")

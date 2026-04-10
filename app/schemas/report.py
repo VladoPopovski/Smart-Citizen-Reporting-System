@@ -44,4 +44,6 @@ class ReportRead(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     created_at: datetime
+    possible_duplicate_of: int | None = None
+
 

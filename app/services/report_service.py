@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
+from  datetime import datetime, timezone
+
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -14,6 +16,8 @@ from app.models.report import Report
 from app.schemas.report import ReportCreate, ReportRead, ReportUpdate, StatusUpdate
 from app.schemas.user import CurrentUser, UserRole
 from app.services.ai_service import classify_text
+from app.utils.duplicate_detection import check_duplicate
+
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +38,6 @@ def create_report(db: Session, *, report_in: ReportCreate, current_user: Current
     """Persist a new report, auto-assign category (optional), and return it."""
     settings = get_settings()
 
-    #  Fetch all category names from DB for classifier's choices
     categories = db.scalars(select(Category)).all()
     category_name_key_to_id = {_normalize_category_key(c.name): c.id for c in categories}
     candidate_labels = [_classifier_label_for_category(c.name) for c in categories]
@@ -44,7 +47,6 @@ def create_report(db: Session, *, report_in: ReportCreate, current_user: Current
 
     category_id: int | None = None
 
-    # Match category via AI (if enabled)
     predicted_label = None
     if settings.ai_enabled:
         try:
@@ -60,8 +62,7 @@ def create_report(db: Session, *, report_in: ReportCreate, current_user: Current
     if predicted_label:
         predicted_key = _normalize_category_key(predicted_label)
 
-        # Prefer matching against DB category names, but also allow matching against
-        # classifier-facing labels (e.g., "Safety (accidents and hazards)").
+
         category_id = category_name_key_to_id.get(predicted_key)
         if category_id is None:
             category_id = classifier_label_key_to_id.get(predicted_key)
@@ -74,7 +75,6 @@ def create_report(db: Session, *, report_in: ReportCreate, current_user: Current
         if settings.ai_enabled:
             logger.warning("Classification returned None — falling back to default category.")
 
-    # Fallback category (default: "Other")
     if (
         settings.ai_enabled
         and predicted_label is None
@@ -95,13 +95,30 @@ def create_report(db: Session, *, report_in: ReportCreate, current_user: Current
                 settings.ai_default_category_name,
             )
 
-    #  Save report with resolved category_id (may be NULL)
+
+    now = datetime.now(tz=timezone.utc)
+
+    possible_duplicate_of = check_duplicate(
+        description=report_in.description,
+        latitude=report_in.latitude,
+        longitude=report_in.longitude,
+        created_at=now,
+        db=db,
+    )
+
+    if possible_duplicate_of is not None:
+        logger.warning(
+            "New report may be a duplicate of report id=%d — saving with flag set.",
+            possible_duplicate_of,
+        )
+
     report = Report(
         description=report_in.description,
         latitude=report_in.latitude,
         longitude=report_in.longitude,
         user_id=current_user.id,
         category_id=category_id,
+        possible_duplicate_of=possible_duplicate_of,
     )
     db.add(report)
     db.commit()
@@ -159,7 +176,6 @@ def update_report(
 
     update_data = report_in.model_dump(exclude_unset=True)
 
-    # Citizens may not change category or status — those are officer/admin fields
     if current_user.role == UserRole.citizen:
         update_data.pop("category_id", None)
         update_data.pop("status_id", None)

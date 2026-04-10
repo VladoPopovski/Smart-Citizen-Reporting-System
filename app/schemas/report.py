@@ -36,8 +36,6 @@ class StatusUpdate(BaseModel):
     status_id: int
 
 
-class ReportRead(BaseModel):
-    """Output schema for report responses."""
 class ReportRead(ReportBase):
     """Schema returned in API responses."""
 
@@ -49,5 +47,3 @@ class ReportRead(ReportBase):
     user_id: UUID
     created_at: datetime
     possible_duplicate_of: int | None = None
-
-

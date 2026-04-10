@@ -6,20 +6,25 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class ReportCreate(BaseModel):
-    """
-    Input schema for creating a report.
+class ReportBase(BaseModel):
+    """Base fields shared across report schemas."""
 
-    Category/status are intentionally omitted here; the system can assign them later
-    (e.g., via AI classification + workflow rules).
-    """
-
-    description: str = Field(min_length=1, max_length=5000)
+    description: str = Field(..., min_length=1, max_length=5000)
     latitude: float | None = None
     longitude: float | None = None
 
 
+class ReportCreate(ReportBase):
+    """
+    Schema used when creating a new report.
+    Category and status are assigned later by the system.
+    """
+    pass
+
+
 class ReportUpdate(BaseModel):
+    """Schema used for updating an existing report."""
+
     description: str | None = Field(default=None, min_length=1, max_length=5000)
     latitude: float | None = None
     longitude: float | None = None
@@ -33,16 +38,15 @@ class StatusUpdate(BaseModel):
 
 class ReportRead(BaseModel):
     """Output schema for report responses."""
+class ReportRead(ReportBase):
+    """Schema returned in API responses."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    description: str
     category_id: int | None = None
     status_id: int | None = None
     user_id: UUID
-    latitude: float | None = None
-    longitude: float | None = None
     created_at: datetime
     possible_duplicate_of: int | None = None
 

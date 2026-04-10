@@ -75,6 +75,26 @@ REPORTS = [
     ),
 ]
 
+CATEGORIES = [
+    {"id": 1, "name": "Infrastructure"},
+    {"id": 2, "name": "Environment"},
+    {"id": 3, "name": "Safety"},
+    {"id": 4, "name": "Other"},
+]
+
+STATUSES = [
+    {"id": 1, "name": "Submitted"},
+    {"id": 2, "name": "In Progress"},
+    {"id": 3, "name": "Resolved"},
+    {"id": 4, "name": "Rejected"},
+    {"id": 5, "name": "Closed"},
+    {"id": 6, "name": "Pending"},
+]
+
+
+# ---------------------------------------------------------------------------
+# Seed function
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Seed function
@@ -104,7 +124,9 @@ def seed() -> None:
             print("Inserted categories.")
         else:
             print("Categories already seeded.")
+            print("Users already seeded.")
 
+        # ---------------- REPORTS ----------------
         # ---------------- STATUSES ----------------
         if db.scalar(select(func.count()).select_from(Status)) == 0:
             db.add_all([Status(**s) for s in STATUSES])
@@ -119,6 +141,23 @@ def seed() -> None:
             db.commit()
             print(f"Inserted {len(REPORTS)} report(s).")
         else:
+            print("Reports already seeded.")
+
+        # ---------------- CATEGORIES ----------------
+        if db.scalar(select(func.count()).select_from(Category)) == 0:
+            db.add_all([Category(**c) for c in CATEGORIES])
+            db.commit()
+            print("Inserted categories.")
+        else:
+            print("Categories already seeded.")
+
+        # ---------------- STATUSES ----------------
+        if db.scalar(select(func.count()).select_from(Status)) == 0:
+            db.add_all([Status(**s) for s in STATUSES])
+            db.commit()
+            print("Inserted statuses.")
+        else:
+            print("Statuses already seeded.")
             print("Reports already seeded.")
 
     print("Done seeding!")

@@ -9,6 +9,7 @@ import LoginPage from "./pages/LoginPage";
 import HomePage from "./pages/HomePage";
 import MyComplaintsPage from "./pages/MyComplaintsPage";
 import NewComplaintPage from "./pages/NewComplaintPage";
+import ComplaintDetailPage from "./pages/ComplaintDetailPage";
 import DashboardPage from "./pages/DashboardPage";
 import AssignedComplaintsPage from "./pages/AssignedComplaintsPage";
 import ManageComplaintsPage from "./pages/ManageComplaintsPage";
@@ -38,7 +39,7 @@ function AppRoutes() {
           <Route path="/" element={<HomePage />} />
           <Route path="/my-complaints" element={<MyComplaintsPage />} />
           <Route path="/new-complaint" element={<NewComplaintPage />} />
-
+          <Route path="/reports/:id" element={<ComplaintDetailPage />} />
         </>
       )}
 
@@ -46,6 +47,7 @@ function AppRoutes() {
         <>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/assigned-complaints" element={<AssignedComplaintsPage />} />
+          <Route path="/reports/:id" element={<ComplaintDetailPage />} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
         </>
       )}
@@ -55,6 +57,7 @@ function AppRoutes() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/manage-complaints" element={<ManageComplaintsPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
+          <Route path="/reports/:id" element={<ComplaintDetailPage />} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
         </>
       )}

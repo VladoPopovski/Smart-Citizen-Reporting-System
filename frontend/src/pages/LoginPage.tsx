@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import logo from "@/assets/Urban.png";
 
 interface LoginPageProps {
   mode?: "login" | "register";
@@ -38,10 +39,9 @@ export default function LoginPage({ mode = "login" }: LoginPageProps) {
       {/* Navbar */}
       <header className="h-16 border-b bg-card flex items-center justify-between px-6">
         <button onClick={() => navigate("/")} className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-            <span className="text-primary-foreground font-bold text-sm">U</span>
+          <div className="flex items-center gap-2">
+            <img src={logo} className="h-10 w-auto" />
           </div>
-          <span className="text-xl font-bold text-foreground">UrbanCare</span>
         </button>
       </header>
 

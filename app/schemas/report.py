@@ -74,6 +74,5 @@ class ReportRead(ReportBase):
     created_at: datetime
     updated_at: datetime
     possible_duplicate_of: int | None = None
-    possible_duplicate_of: int | None = None
     history_entries: list[HistoryRead] = []
     comments: list[CommentRead] = []

@@ -1,22 +1,24 @@
 from __future__ import annotations
 
 import logging
+from time import perf_counter
 from uuid import UUID
 
-from  datetime import datetime, timezone
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.db.session import SessionLocal
 from app.models.category import Category
 from app.models.history import History
 from app.models.report import Report
 from app.models.comment import Comment
 from app.schemas.report import CommentCreate, CommentRead, ReportCreate, ReportRead, ReportUpdate, StatusUpdate
 from app.schemas.user import CurrentUser, UserRole
-from app.services.ai_service import classify_text
+from app.services.ai_service import classify_text, generate_confirmation_message
 from app.utils.duplicate_detection import check_duplicate
 
 
@@ -36,70 +38,19 @@ def _classifier_label_for_category(category_name: str) -> str:
 
 
 def create_report(db: Session, *, report_in: ReportCreate, current_user: CurrentUser) -> ReportRead:
-    """Persist a new report, auto-assign category (optional), and return it."""
-    settings = get_settings()
-
-    categories = db.scalars(select(Category)).all()
-    category_name_key_to_id = {_normalize_category_key(c.name): c.id for c in categories}
-    candidate_labels = [_classifier_label_for_category(c.name) for c in categories]
-    classifier_label_key_to_id = {
-        _normalize_category_key(_classifier_label_for_category(c.name)): c.id for c in categories
-    }
-
-    category_id: int | None = report_in.category_id
-    predicted_label = None
-
-    if category_id is None:
-        predicted_label = None
-        if settings.ai_enabled:
-            try:
-                predicted_label = classify_text(
-                    report_in.description,
-                    candidate_labels,
-                    min_confidence=settings.ai_min_confidence,
-                )
-            except Exception:
-                logger.exception("AI classification failed.")
-                predicted_label = None
-
-    if predicted_label:
-        predicted_key = _normalize_category_key(predicted_label)
-
-
-        category_id = category_name_key_to_id.get(predicted_key)
-        if category_id is None:
-            category_id = classifier_label_key_to_id.get(predicted_key)
-
-        if category_id is not None:
-            logger.info("Auto-assigned category_id=%d ('%s')", category_id, predicted_label)
-        else:
-            logger.warning("AI classification label not matched to DB category: %s", predicted_label)
-    else:
-        if settings.ai_enabled:
-            logger.warning("Classification returned None — falling back to default category.")
-
-    if (
-        settings.ai_enabled
-        and predicted_label is None
-        and category_id is None
-        and settings.ai_default_category_name
-    ):
-        fallback_id = category_name_key_to_id.get(_normalize_category_key(settings.ai_default_category_name))
-        if fallback_id is not None:
-            category_id = fallback_id
-            logger.info(
-                "Applied fallback category_id=%d ('%s')",
-                category_id,
-                settings.ai_default_category_name,
-            )
-        else:
-            logger.warning(
-                "Fallback category '%s' not found in DB — category_id left NULL.",
-                settings.ai_default_category_name,
-            )
-
-
+    """Persist a new report and return it (AI runs asynchronously in a background task)."""
     now = datetime.now(tz=timezone.utc)
+
+    category_id = report_in.category_id
+    if category_id is not None:
+        # Some clients send `0` as a placeholder value; treat as "unset" so
+        # report creation doesn't fail the FK constraint and AI can classify later.
+        if category_id <= 0:
+            logger.info("Ignoring invalid category_id=%r on report creation.", category_id)
+            category_id = None
+        elif db.get(Category, category_id) is None:
+            logger.info("Ignoring unknown category_id=%r on report creation.", category_id)
+            category_id = None
 
     possible_duplicate_of = check_duplicate(
         description=report_in.description,
@@ -127,6 +78,135 @@ def create_report(db: Session, *, report_in: ReportCreate, current_user: Current
     db.commit()
     db.refresh(report)
     return ReportRead.model_validate(report)
+
+
+def run_report_ai_pipeline(report_id: int) -> None:
+    """
+    Background AI pipeline for a report:
+    - classify description -> set category_id (if still NULL)
+    - generate a confirmation message (optional persisted comment)
+
+    This must never raise: report creation should not fail due to AI.
+    """
+    settings = get_settings()
+    if not settings.ai_enabled:
+        return
+
+    total_start = perf_counter()
+    db: Session = SessionLocal()
+    try:
+        report = db.get(Report, report_id)
+        if report is None:
+            logger.warning("AI pipeline: report_id=%d not found — skipping.", report_id)
+            return
+
+        categories = db.scalars(select(Category)).all()
+        if not categories:
+            logger.warning("AI pipeline: no categories found — skipping classification for report_id=%d.", report_id)
+            categories_sorted: list[Category] = []
+        else:
+            categories_sorted = sorted(categories, key=lambda c: c.name.casefold())
+
+        category_name_key_to_id = {_normalize_category_key(c.name): c.id for c in categories_sorted}
+        classifier_label_key_to_id = {
+            _normalize_category_key(_classifier_label_for_category(c.name)): c.id for c in categories_sorted
+        }
+        candidate_labels = [_classifier_label_for_category(c.name) for c in categories_sorted]
+
+        predicted_label: str | None = None
+        category_changed = False
+
+        # Only auto-assign when the report still has no category (do not override user/admin updates).
+        if report.category_id is None and candidate_labels:
+            try:
+                predicted_label = classify_text(
+                    report.description,
+                    candidate_labels,
+                    min_confidence=settings.ai_min_confidence,
+                )
+            except Exception:
+                logger.warning("AI unavailable — skipping classification for report_id=%d.", report_id, exc_info=True)
+                predicted_label = None
+
+        if report.category_id is None and predicted_label:
+            predicted_key = _normalize_category_key(predicted_label)
+            new_category_id = category_name_key_to_id.get(predicted_key) or classifier_label_key_to_id.get(predicted_key)
+            if new_category_id is not None:
+                report.category_id = new_category_id
+                category_changed = True
+                logger.info(
+                    "Auto-assigned category_id=%d ('%s') for report_id=%d",
+                    new_category_id,
+                    predicted_label,
+                    report_id,
+                )
+            else:
+                logger.warning("AI classification label not matched to DB category: %s", predicted_label)
+
+        if report.category_id is None and settings.ai_default_category_name:
+            fallback_id = category_name_key_to_id.get(_normalize_category_key(settings.ai_default_category_name))
+            if fallback_id is not None:
+                report.category_id = fallback_id
+                category_changed = True
+                logger.info(
+                    "Applied fallback category_id=%d ('%s') for report_id=%d",
+                    fallback_id,
+                    settings.ai_default_category_name,
+                    report_id,
+                )
+            else:
+                logger.warning(
+                    "Fallback category '%s' not found in DB — category_id left NULL for report_id=%d.",
+                    settings.ai_default_category_name,
+                    report_id,
+                )
+
+        if category_changed:
+            db.commit()
+
+        category_label_for_message: str | None = None
+        if report.category_id is not None:
+            category_label_for_message = next(
+                (c.name for c in categories_sorted if c.id == report.category_id),
+                None,
+            )
+
+        message = generate_confirmation_message(
+            report.description,
+            category_label=category_label_for_message,
+            possible_duplicate_of=report.possible_duplicate_of,
+        )
+
+        if message and settings.ai_confirmation_comment_user_id is not None:
+            existing = db.scalars(
+                select(Comment)
+                .where(Comment.report_id == report.id)
+                .where(Comment.user_id == settings.ai_confirmation_comment_user_id)
+            ).first()
+            if existing is None:
+                db.add(
+                    Comment(
+                        report_id=report.id,
+                        user_id=settings.ai_confirmation_comment_user_id,
+                        content=message,
+                    )
+                )
+                try:
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    logger.warning(
+                        "AI confirmation persistence failed — skipping comment for report_id=%d.",
+                        report_id,
+                        exc_info=True,
+                    )
+
+        elapsed_ms_total = (perf_counter() - total_start) * 1000
+        logger.info("AI pipeline latency: %.0fms", elapsed_ms_total)
+    except Exception:
+        logger.warning("AI pipeline failed for report_id=%d — skipping.", report_id, exc_info=True)
+    finally:
+        db.close()
 
 
 def list_reports(db: Session, *, current_user: CurrentUser) -> list[ReportRead]:

@@ -25,11 +25,11 @@ export default function LoginPage({ mode = "login" }: LoginPageProps) {
     if (!role) return;
     console.log(`${activeTab} submitted:`, { email, password, role });
     login(role as UserRole);
-    navigate(role === "client" ? "/" : "/dashboard");
+    navigate(role === "citizen" ? "/" : "/dashboard");
   };
 
   const roleLabels: Record<UserRole, string> = {
-    client: "Корисник",
+    citizen: "Корисник",
     officer: "Службеник",
     admin: "Администратор",
   };
@@ -40,7 +40,7 @@ export default function LoginPage({ mode = "login" }: LoginPageProps) {
       <header className="h-16 border-b bg-card flex items-center justify-between px-6">
         <button onClick={() => navigate("/")} className="flex items-center gap-2">
           <div className="flex items-center gap-2">
-            <img src={logo} className="h-10 w-auto" />
+            <img src={logo} className="h-16 w-auto" />
           </div>
         </button>
       </header>

@@ -43,6 +43,7 @@ export default function NewComplaintPage() {
         description,
         latitude: lat,
         longitude: lng,
+        category_id: category ? Number(category) : null,
       });
 
       toast({ title: "Успешно!", description: "Вашата пријава е успешно поднесена." });
@@ -54,7 +55,7 @@ export default function NewComplaintPage() {
         });
       }
 
-      navigate(`/reports/${report.id}`);
+      navigate(`/complaints/${report.id}`);
     } catch (err: any) {
       setError(err.message ?? "Грешка при поднесување на пријавата.");
     } finally {
@@ -77,9 +78,9 @@ export default function NewComplaintPage() {
               <p className="text-sm text-muted-foreground">Обидете се да бидете што попрецизни при описот на ситуацијата.</p>
             </CardHeader>
             <CardContent className="space-y-5">
-              {/* Category — visible for guidance only, NOT submitted */}
+              {/* Category */}
               <div className="space-y-2">
-                <Label htmlFor="category">Категорија (информативно)</Label>
+                <Label htmlFor="category">Категорија (опционално)</Label>
                 <Select value={category} onValueChange={setCategory}>
                   <SelectTrigger id="category"><SelectValue placeholder="Изберете категорија" /></SelectTrigger>
                   <SelectContent>
@@ -88,7 +89,7 @@ export default function NewComplaintPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground italic">Категоријата ќе биде доделена од системот.</p>
+                <p className="text-xs text-muted-foreground italic">Ако не изберете, системот ќе се обиде автоматски да ја одреди категоријата.</p>
               </div>
 
               {/* Description */}

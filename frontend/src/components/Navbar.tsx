@@ -9,7 +9,7 @@ export function Navbar() {
   const navigate = useNavigate();
 
   const roleLabels: Record<string, string> = {
-    client: "Корисник",
+    citizen: "Корисник",
     officer: "Службеник",
     admin: "Администратор",
   };
@@ -22,7 +22,7 @@ export function Navbar() {
   return (
     <header className="h-16 border-b bg-card flex items-center justify-between px-6 sticky top-0 z-50">
       <div className="flex items-center gap-2">
-        <img src={logo} className="h-10 w-auto" />
+        <img src={logo} className="h-14 w-auto" />
       </div>
 
       <div className="flex items-center gap-4">

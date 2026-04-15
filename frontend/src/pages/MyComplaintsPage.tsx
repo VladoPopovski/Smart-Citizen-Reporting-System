@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search, Plus, MapPin, Calendar } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { fetchReports, type ReportRead } from "@/services/reports";
+import { fetchReports } from "@/services/reports";
 import { useLookups } from "@/hooks/useLookups";
 import { deriveTitle, formatDate, formatCoords, getStatusStyle } from "@/lib/reportHelpers";
 
@@ -16,24 +17,14 @@ export default function MyComplaintsPage() {
   const navigate = useNavigate();
   const { categories, statuses, categoryLabel, statusLabel } = useLookups();
 
-  const [reports, setReports] = useState<ReportRead[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: reports = [], isLoading, error, refetch } = useQuery({
+    queryKey: ["reports"],
+    queryFn: fetchReports,
+  });
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetchReports()
-      .then((data) => { if (!cancelled) setReports(data); })
-      .catch((err) => { if (!cancelled) setError(err.message ?? "Грешка при вчитување."); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, []);
 
   const filtered = reports.filter((r) => {
     const matchSearch = r.description.toLowerCase().includes(search.toLowerCase());
@@ -84,7 +75,7 @@ export default function MyComplaintsPage() {
         </Card>
 
         {/* Loading */}
-        {loading && (
+        {isLoading && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {Array.from({ length: 6 }).map((_, i) => (
               <Card key={i}><CardContent className="p-5 space-y-3"><Skeleton className="h-5 w-3/4" /><Skeleton className="h-4 w-full" /><Skeleton className="h-3 w-1/2" /></CardContent></Card>
@@ -96,17 +87,17 @@ export default function MyComplaintsPage() {
         {error && (
           <div className="text-center py-12 text-destructive">
             <p className="font-semibold">Грешка</p>
-            <p className="text-sm">{error}</p>
-            <Button variant="outline" className="mt-4" onClick={() => window.location.reload()}>Обиди се повторно</Button>
+            <p className="text-sm">{(error as Error).message ?? "Грешка при вчитување."}</p>
+            <Button variant="outline" className="mt-4" onClick={() => refetch()}>Обиди се повторно</Button>
           </div>
         )}
 
         {/* Cards */}
-        {!loading && !error && (
+        {!isLoading && !error && (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filtered.map((r) => (
-                <Card key={r.id} className="hover:shadow-md transition-shadow cursor-pointer group" onClick={() => navigate(`/reports/${r.id}`)}>
+                <Card key={r.id} className="hover:shadow-md transition-shadow cursor-pointer group" onClick={() => navigate(`/complaints/${r.id}`)}>
                   <CardContent className="p-5 space-y-3">
                     <div className="flex justify-between items-start">
                       <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors line-clamp-2">{deriveTitle(r.description)}</h3>

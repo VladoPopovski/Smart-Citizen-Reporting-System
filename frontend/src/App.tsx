@@ -14,6 +14,7 @@ import DashboardPage from "./pages/DashboardPage";
 import AssignedComplaintsPage from "./pages/AssignedComplaintsPage";
 import ManageComplaintsPage from "./pages/ManageComplaintsPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
+import PublicMapPage from "./pages/PublicMapPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -34,12 +35,15 @@ function AppRoutes() {
 
   return (
     <Routes>
-      {role === "client" && (
+      {/* Shared routes for all authenticated users */}
+      <Route path="/public-map" element={<PublicMapPage />} />
+
+      {role === "citizen" && (
         <>
           <Route path="/" element={<HomePage />} />
           <Route path="/my-complaints" element={<MyComplaintsPage />} />
           <Route path="/new-complaint" element={<NewComplaintPage />} />
-          <Route path="/reports/:id" element={<ComplaintDetailPage />} />
+          <Route path="/complaints/:id" element={<ComplaintDetailPage />} />
         </>
       )}
 
@@ -47,7 +51,7 @@ function AppRoutes() {
         <>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/assigned-complaints" element={<AssignedComplaintsPage />} />
-          <Route path="/reports/:id" element={<ComplaintDetailPage />} />
+          <Route path="/complaints/:id" element={<ComplaintDetailPage />} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
         </>
       )}
@@ -57,7 +61,7 @@ function AppRoutes() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/manage-complaints" element={<ManageComplaintsPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
-          <Route path="/reports/:id" element={<ComplaintDetailPage />} />
+          <Route path="/complaints/:id" element={<ComplaintDetailPage />} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
         </>
       )}

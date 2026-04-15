@@ -6,6 +6,7 @@ import {
   ClipboardList,
   BarChart3,
   Settings,
+  Map as MapIcon,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useRole } from "@/context/RoleContext";
@@ -16,19 +17,22 @@ interface NavItem {
   icon: React.ElementType;
 }
 
-const clientNav: NavItem[] = [
+const citizenNav: NavItem[] = [
   { title: "Почетна", url: "/", icon: Home },
+  { title: "Интерактивна мапа", url: "/public-map", icon: MapIcon },
   { title: "Мои пријави", url: "/my-complaints", icon: FileText },
   { title: "Нова пријава", url: "/new-complaint", icon: PlusCircle },
 ];
 
 const officerNav: NavItem[] = [
   { title: "Контролна табла", url: "/dashboard", icon: LayoutDashboard },
+  { title: "Интерактивна мапа", url: "/public-map", icon: MapIcon },
   { title: "Доделени пријави", url: "/assigned-complaints", icon: ClipboardList },
 ];
 
 const adminNav: NavItem[] = [
   { title: "Контролна табла", url: "/dashboard", icon: LayoutDashboard },
+  { title: "Интерактивна мапа", url: "/public-map", icon: MapIcon },
   { title: "Управување со пријави", url: "/manage-complaints", icon: Settings },
   { title: "Аналитички преглед", url: "/analytics", icon: BarChart3 },
 ];
@@ -37,7 +41,7 @@ export function AppSidebar() {
   const { role } = useRole();
 
   const navItems =
-    role === "client" ? clientNav :
+    role === "citizen" ? citizenNav :
     role === "officer" ? officerNav :
     adminNav;
 

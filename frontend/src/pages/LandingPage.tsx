@@ -2,6 +2,7 @@ import { FileText, CheckCircle, Users, ArrowRight, Shield, Building2, Megaphone 
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
+import logo from "@/assets/Urban.png";
 
 export default function LandingPage() {
   const navigate = useNavigate();
@@ -24,10 +25,7 @@ export default function LandingPage() {
       {/* Navbar */}
       <header className="h-16 border-b bg-card flex items-center justify-between px-6 sticky top-0 z-50">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-            <span className="text-primary-foreground font-bold text-sm">U</span>
-          </div>
-          <span className="text-xl font-bold text-foreground">UrbanCare</span>
+          <img src={logo} className="h-16 w-auto" />
         </div>
         <div className="flex items-center gap-3">
           <Button variant="ghost" onClick={() => navigate("/login")}>Најава</Button>

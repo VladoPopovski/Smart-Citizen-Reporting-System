@@ -78,21 +78,20 @@ export const complaints: Complaint[] = [
     citizen: "Марија Коцева",
   },
 ];
-
 export interface User {
   id: string;
   name: string;
   email: string;
-  role: "client" | "officer" | "admin";
+  role: "citizen" | "officer" | "admin";
   status: "active" | "inactive";
   dateJoined: string;
 }
 
-export const users: User[] = [
-  { id: "U-001", name: "Марко Петров", email: "marko@mail.mk", role: "client", status: "active", dateJoined: "2024-01-10" },
+export const mockUsers: User[] = [
+  { id: "U-001", name: "Марко Петров", email: "marko@mail.mk", role: "citizen", status: "active", dateJoined: "2024-01-10" },
   { id: "U-002", name: "Ана Стојанова", email: "ana@mail.mk", role: "officer", status: "active", dateJoined: "2024-02-15" },
-  { id: "U-003", name: "Игор Николов", email: "igor@mail.mk", role: "client", status: "active", dateJoined: "2024-03-20" },
-  { id: "U-004", name: "Елена Ристеска", email: "elena@mail.mk", role: "client", status: "inactive", dateJoined: "2024-01-05" },
+  { id: "U-003", name: "Игор Николов", email: "igor@mail.mk", role: "citizen", status: "active", dateJoined: "2024-03-20" },
+  { id: "U-004", name: "Елена Ристеска", email: "elena@mail.mk", role: "citizen", status: "inactive", dateJoined: "2024-01-05" },
   { id: "U-005", name: "Дарко Митев", email: "darko@mail.mk", role: "officer", status: "active", dateJoined: "2024-04-01" },
   { id: "U-006", name: "Админ Корисник", email: "admin@urbancare.mk", role: "admin", status: "active", dateJoined: "2023-12-01" },
 ];

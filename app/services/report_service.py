@@ -13,7 +13,8 @@ from app.core.config import get_settings
 from app.models.category import Category
 from app.models.history import History
 from app.models.report import Report
-from app.schemas.report import ReportCreate, ReportRead, ReportUpdate, StatusUpdate
+from app.models.comment import Comment
+from app.schemas.report import CommentCreate, CommentRead, ReportCreate, ReportRead, ReportUpdate, StatusUpdate
 from app.schemas.user import CurrentUser, UserRole
 from app.services.ai_service import classify_text
 from app.utils.duplicate_detection import check_duplicate
@@ -45,19 +46,21 @@ def create_report(db: Session, *, report_in: ReportCreate, current_user: Current
         _normalize_category_key(_classifier_label_for_category(c.name)): c.id for c in categories
     }
 
-    category_id: int | None = None
-
+    category_id: int | None = report_in.category_id
     predicted_label = None
-    if settings.ai_enabled:
-        try:
-            predicted_label = classify_text(
-                report_in.description,
-                candidate_labels,
-                min_confidence=settings.ai_min_confidence,
-            )
-        except Exception:
-            logger.exception("AI classification failed.")
-            predicted_label = None
+
+    if category_id is None:
+        predicted_label = None
+        if settings.ai_enabled:
+            try:
+                predicted_label = classify_text(
+                    report_in.description,
+                    candidate_labels,
+                    min_confidence=settings.ai_min_confidence,
+                )
+            except Exception:
+                logger.exception("AI classification failed.")
+                predicted_label = None
 
     if predicted_label:
         predicted_key = _normalize_category_key(predicted_label)
@@ -217,3 +220,23 @@ def delete_report(db: Session, *, report_id: int, current_user: CurrentUser) -> 
 
     db.delete(report)
     db.commit()
+
+
+def create_comment(
+    db: Session, *, report_id: int, comment_in: CommentCreate, current_user: CurrentUser
+) -> CommentRead:
+    """Add a comment to a report. Officers and admins only (per UI requirement)."""
+    # Verification of roles is handled at router level, but we check here too for safety.
+    if current_user.role not in [UserRole.officer, UserRole.admin]:
+        raise HTTPException(status_code=403, detail="Only officers and admins can comment")
+
+    report = _get_or_404(db, report_id)
+    comment = Comment(
+        report_id=report.id,
+        user_id=current_user.id,
+        content=comment_in.content,
+    )
+    db.add(comment)
+    db.commit()
+    db.refresh(comment)
+    return CommentRead.model_validate(comment)

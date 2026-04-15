@@ -3,13 +3,13 @@ import { useRole } from "@/context/RoleContext";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
-
+import logo from "@/assets/Urban.png";
 export function Navbar() {
   const { role, userName, logout } = useRole();
   const navigate = useNavigate();
 
   const roleLabels: Record<string, string> = {
-    client: "Корисник",
+    citizen: "Корисник",
     officer: "Службеник",
     admin: "Администратор",
   };
@@ -22,10 +22,7 @@ export function Navbar() {
   return (
     <header className="h-16 border-b bg-card flex items-center justify-between px-6 sticky top-0 z-50">
       <div className="flex items-center gap-2">
-        <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-          <span className="text-primary-foreground font-bold text-sm">U</span>
-        </div>
-        <span className="text-xl font-bold text-foreground">UrbanCare</span>
+        <img src={logo} className="h-14 w-auto" />
       </div>
 
       <div className="flex items-center gap-4">

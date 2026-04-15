@@ -14,6 +14,12 @@ class ReportBase(BaseModel):
 
 class ReportCreate(ReportBase):
     title: str | None = None
+    """
+    Schema used when creating a new report.
+    Category and status are assigned later by the system,
+    but the user can optionally suggest one.
+    """
+    category_id: int | None = None
 
 
 class ReportUpdate(BaseModel):
@@ -26,6 +32,33 @@ class ReportUpdate(BaseModel):
 
 class StatusUpdate(BaseModel):
     status_id: int
+
+
+class CommentCreate(BaseModel):
+    content: str = Field(..., min_length=1, max_length=2000)
+
+
+class CommentRead(BaseModel):
+    """Schema returned for report comments."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    user_id: UUID
+    content: str
+    created_at: datetime
+
+
+class HistoryRead(BaseModel):
+    """Schema returned for report history entries."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    old_status_id: int | None = None
+    status_id: int | None = None
+    changed_by_user_id: UUID | None = None
+    created_at: datetime
 
 
 class ReportRead(ReportBase):
@@ -41,3 +74,6 @@ class ReportRead(ReportBase):
     created_at: datetime
     updated_at: datetime
     possible_duplicate_of: int | None = None
+    possible_duplicate_of: int | None = None
+    history_entries: list[HistoryRead] = []
+    comments: list[CommentRead] = []

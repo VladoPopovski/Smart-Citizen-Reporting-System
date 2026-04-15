@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.report import ReportCreate, ReportRead, ReportUpdate, StatusUpdate
+from app.schemas.report import CommentCreate, CommentRead, ReportCreate, ReportRead, ReportUpdate, StatusUpdate
 from app.schemas.user import CurrentUser, UserRole
 from app.services import report_service
 from app.utils.dependencies import get_current_user, require_roles
@@ -79,3 +79,14 @@ def delete_report(
 ) -> None:
     """Delete a report. Citizens can only delete their own; admins can delete any."""
     report_service.delete_report(db, report_id=report_id, current_user=current_user)
+
+
+@router.post("/{report_id}/comments", response_model=CommentRead, status_code=201)
+def create_comment(
+    report_id: int,
+    comment_in: CommentCreate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin)),
+) -> CommentRead:
+    """Add a comment to a report. Officers and admins only."""
+    return report_service.create_comment(db, report_id=report_id, comment_in=comment_in, current_user=current_user)

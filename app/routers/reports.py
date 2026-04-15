@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -13,11 +13,14 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 @router.post("", response_model=ReportRead, status_code=201)
 def create_report(
     report_in: ReportCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.citizen, UserRole.admin)),
 ) -> ReportRead:
     """Create a citizen report. Only citizens and admins may submit reports."""
-    return report_service.create_report(db, report_in=report_in, current_user=current_user)
+    report = report_service.create_report(db, report_in=report_in, current_user=current_user)
+    background_tasks.add_task(report_service.run_report_ai_pipeline, report.id)
+    return report
 
 
 @router.get("", response_model=list[ReportRead])

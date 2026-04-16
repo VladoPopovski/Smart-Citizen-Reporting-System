@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.routers import admin, reports, users, categories, statuses, analytics
+
 api_router = APIRouter()
 
 # Public / user-facing routers
@@ -12,4 +13,3 @@ api_router.include_router(statuses.router)
 # Admin-only routers
 api_router.include_router(admin.router)
 api_router.include_router(analytics.router)
-

@@ -330,3 +330,152 @@ def generate_confirmation_message(
         elapsed_ms = (perf_counter() - start) * 1000
         logger.info("AI confirmation generation latency: %.0fms (template fallback)", elapsed_ms)
         return template_message
+
+
+#  Macedonian confirmation via HuggingFace Inference API
+
+import requests as _requests  # stdlib requests — already a transitive dep of transformers
+
+_MK_FALLBACK_TEMPLATE = (
+    "Вашата пријава е успешно примена и ќе биде разгледана наскоро."
+    "{category_part}"
+    " Очекувајте одговор во рок од 3–5 работни дена."
+    "{duplicate_part}"
+    " Ви благодариме за придонесот кон подобрување на нашата заедница."
+)
+
+
+def _mk_fallback(
+    category_label: str | None,
+    possible_duplicate_of: int | None,
+) -> str:
+    """Return a deterministic Macedonian confirmation (no AI required)."""
+    category_part = (
+        f" Пријавата е класифицирана во категоријата: {category_label}."
+        if category_label
+        else ""
+    )
+    duplicate_part = (
+        f" Забележавме дdека оваа пријава може да е слична на пријава #{possible_duplicate_of};"
+        " нашиот тим ќе го разгледа тоа."
+        if possible_duplicate_of is not None
+        else ""
+    )
+    return _MK_FALLBACK_TEMPLATE.format(
+        category_part=category_part,
+        duplicate_part=duplicate_part,
+    )
+
+
+def _build_mk_prompt(
+    description: str,
+    category_label: str | None,
+    possible_duplicate_of: int | None,
+) -> str:
+    """Build a Mistral-instruct-format prompt that requests a Macedonian reply."""
+    details: list[str] = [f"- Опис на пријавата: {description.strip()}"]
+    if category_label:
+        details.append(f"- Категорија: {category_label}")
+    if possible_duplicate_of is not None:
+        details.append(f"- Можна дупликат на пријава бр.: {possible_duplicate_of}")
+
+    instruction = (
+        "Ти си асистент на систем за управување со граѓански поплаки во македонски град. "
+        "Генерирај кратка потврдна порака НА МАКЕДОНСКИ ЈАЗИК за граѓанин кој поднел нова пријава.\n\n"
+        "Детали за пријавата:\n"
+        + "\n".join(details)
+        + "\n\n"
+        "Пораката МОРА да содржи (во 3–4 реченици):\n"
+        "1. Потврда дека пријавата е примена\n"
+        "2. Класификацијата на проблемот (ако е дадена)\n"
+        "3. Очекуваниот тек / следни чекори\n"
+        "4. Краток совет за граѓанинот\n\n"
+        "Одговори САМО со пораката на македонски. Без воведни фрази, без објаснувања."
+    )
+    # Mistral-instruct chat format
+    return f"<s>[INST] {instruction} [/INST]"
+
+
+def generate_confirmation_mk(
+    description: str,
+    *,
+    category_label: str | None = None,
+    possible_duplicate_of: int | None = None,
+) -> str:
+    """
+    FR-03: Generate a short AI confirmation message in Macedonian.
+
+    Strategy:
+      1. Call HuggingFace Inference API (free) with Mistral-7B-Instruct.
+      2. On any failure (network, rate-limit, bad response) → graceful fallback
+         to a deterministic Macedonian template.  Never raises.
+
+    This runs inside run_report_ai_pipeline (background thread) — non-blocking.
+    """
+    start = perf_counter()
+    settings = get_settings()
+
+    if not settings.ai_enabled:
+        logger.info("FR-03: AI disabled — using MK fallback template.")
+        return _mk_fallback(category_label, possible_duplicate_of)
+
+    prompt = _build_mk_prompt(description, category_label, possible_duplicate_of)
+
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if settings.hf_api_token:
+        headers["Authorization"] = f"Bearer {settings.hf_api_token}"
+
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 250,
+            "temperature": 0.6,
+            "top_p": 0.92,
+            "do_sample": True,
+            "return_full_text": False,   # return only the generated part
+            "stop": ["</s>", "[INST]"],
+        },
+    }
+
+    url = (
+        f"https://api-inference.huggingface.co/models/{settings.ai_hf_inference_model}"
+    )
+
+    try:
+        resp = _requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=settings.ai_hf_inference_timeout_seconds,
+        )
+        resp.raise_for_status()
+
+        data = resp.json()
+
+        # HF text-generation endpoint returns: [{"generated_text": "..."}]
+        if isinstance(data, list) and data and "generated_text" in data[0]:
+            text = data[0]["generated_text"].strip()
+        elif isinstance(data, dict) and "generated_text" in data:
+            # Some model endpoints return a plain dict
+            text = data["generated_text"].strip()
+        else:
+            logger.warning(
+                "FR-03: Unexpected HF response shape: %r — using fallback.", data
+            )
+            text = ""
+
+        if not text:
+            raise ValueError("Empty generated text from HF Inference API")
+
+        elapsed_ms = (perf_counter() - start) * 1000
+        logger.info("FR-03: MK confirmation generated via HF in %.0fms", elapsed_ms)
+        return text
+
+    except Exception:
+        elapsed_ms = (perf_counter() - start) * 1000
+        logger.warning(
+            "FR-03: HF Inference API failed (%.0fms) — using MK fallback template.",
+            elapsed_ms,
+            exc_info=True,
+        )
+        return _mk_fallback(category_label, possible_duplicate_of)

@@ -54,6 +54,9 @@ class Report(Base):
         Integer, ForeignKey("reports.id", ondelete="SET NULL"), nullable=True,
     )
 
+    # AI - generated confirmation text in Macedonian
+    ai_confirmation_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     user: Mapped[User] = relationship(back_populates="reports")
     category: Mapped[Category | None] = relationship(back_populates="reports")
     status: Mapped[Status | None] = relationship(back_populates="reports")

@@ -1,10 +1,15 @@
 from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict
 
 
 class AttachmentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+
     id: int
     report_id: int
     file_url: str
+    original_filename: str
+    content_type: str
+    file_size_bytes: int
     created_at: datetime

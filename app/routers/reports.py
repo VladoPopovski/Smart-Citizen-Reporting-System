@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.report import ReportCreate, ReportRead, ReportUpdate
+from app.schemas.report import CommentCreate, CommentRead, ReportCreate, ReportRead, ReportUpdate, StatusUpdate
 from app.schemas.user import CurrentUser, UserRole
 from app.services import report_service
 from app.utils.dependencies import get_current_user, require_roles
@@ -13,11 +13,14 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 @router.post("", response_model=ReportRead, status_code=201)
 def create_report(
     report_in: ReportCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.citizen, UserRole.admin)),
 ) -> ReportRead:
     """Create a citizen report. Only citizens and admins may submit reports."""
-    return report_service.create_report(db, report_in=report_in, current_user=current_user)
+    report = report_service.create_report(db, report_in=report_in, current_user=current_user)
+    background_tasks.add_task(report_service.run_report_ai_pipeline, report.id)
+    return report
 
 
 @router.get("", response_model=list[ReportRead])
@@ -60,6 +63,17 @@ def update_report(
     return report_service.update_report(db, report_id=report_id, report_in=report_in, current_user=current_user)
 
 
+@router.patch("/{report_id}/status", response_model=ReportRead)
+def update_report_status(
+    report_id: int,
+    status_in: StatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin)),
+) -> ReportRead:
+    """Change a report's status. Officers and admins only. Always logs history."""
+    return report_service.update_status(db, report_id=report_id, status_in=status_in, current_user=current_user)
+
+
 @router.delete("/{report_id}", status_code=204)
 def delete_report(
     report_id: int,
@@ -68,3 +82,14 @@ def delete_report(
 ) -> None:
     """Delete a report. Citizens can only delete their own; admins can delete any."""
     report_service.delete_report(db, report_id=report_id, current_user=current_user)
+
+
+@router.post("/{report_id}/comments", response_model=CommentRead, status_code=201)
+def create_comment(
+    report_id: int,
+    comment_in: CommentCreate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin)),
+) -> CommentRead:
+    """Add a comment to a report. Officers and admins only."""
+    return report_service.create_comment(db, report_id=report_id, comment_in=comment_in, current_user=current_user)

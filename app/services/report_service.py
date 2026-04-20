@@ -18,7 +18,7 @@ from app.models.report import Report
 from app.models.comment import Comment
 from app.schemas.report import CommentCreate, CommentRead, ReportCreate, ReportRead, ReportUpdate, StatusUpdate
 from app.schemas.user import CurrentUser, UserRole
-from app.services.ai_service import classify_text, generate_confirmation_message
+from app.services.ai_service import classify_text, generate_confirmation_message, generate_confirmation_mk
 from app.utils.duplicate_detection import check_duplicate
 
 
@@ -171,11 +171,68 @@ def run_report_ai_pipeline(report_id: int) -> None:
                 None,
             )
 
-        message = generate_confirmation_message(
-            report.description,
-            category_label=category_label_for_message,
-            possible_duplicate_of=report.possible_duplicate_of,
-        )
+            # --- existing confirmation message (English comment, kept as-is) ---
+            category_label_for_message: str | None = None
+            if report.category_id is not None:
+                category_label_for_message = next(
+                    (c.name for c in categories_sorted if c.id == report.category_id),
+                    None,
+                )
+
+            message = generate_confirmation_message(
+                report.description,
+                category_label=category_label_for_message,
+                possible_duplicate_of=report.possible_duplicate_of,
+            )
+
+            # ------------------------------------------------------------------ #
+            # FR-03: AI-generated Macedonian confirmation                         #
+            # Runs here (still in background thread) — never blocks API response  #
+            # ------------------------------------------------------------------ #
+            try:
+                mk_text = generate_confirmation_mk(
+                    report.description,
+                    category_label=category_label_for_message,
+                    possible_duplicate_of=report.possible_duplicate_of,
+                )
+                report.ai_confirmation_text = mk_text
+                db.commit()
+                logger.info(
+                    "FR-03: ai_confirmation_text saved for report_id=%d", report_id
+                )
+            except Exception:
+                # generate_confirmation_mk already catches internally;
+                # this outer guard is an extra safety net.
+                logger.warning(
+                    "FR-03: Unexpected error saving ai_confirmation_text for report_id=%d — skipping.",
+                    report_id,
+                    exc_info=True,
+                )
+            # ------------------------------------------------------------------ #
+
+            if message and settings.ai_confirmation_comment_user_id is not None:
+                existing = db.scalars(
+                    select(Comment)
+                    .where(Comment.report_id == report.id)
+                    .where(Comment.user_id == settings.ai_confirmation_comment_user_id)
+                ).first()
+                if existing is None:
+                    db.add(
+                        Comment(
+                            report_id=report.id,
+                            user_id=settings.ai_confirmation_comment_user_id,
+                            content=message,
+                        )
+                    )
+                    try:
+                        db.commit()
+                    except Exception:
+                        db.rollback()
+                        logger.warning(
+                            "AI confirmation persistence failed — skipping comment for report_id=%d.",
+                            report_id,
+                            exc_info=True,
+                        )
 
         if message and settings.ai_confirmation_comment_user_id is not None:
             existing = db.scalars(

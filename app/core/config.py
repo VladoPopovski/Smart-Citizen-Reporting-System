@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     # Must reference an existing user UUID in the `users` table.
     ai_confirmation_comment_user_id: UUID | None = None
 
+    # --- HuggingFace Inference API for Macedonian confirmation ---
+    # Free tier: https://huggingface.co/inference-api
+    # Add HF_API_TOKEN to your environment for higher rate limits (free account).
+    ai_hf_inference_model: str = "mistralai/Mistral-7B-Instruct-v0.2"
+    ai_hf_inference_timeout_seconds: float = 30.0
+    hf_api_token: str | None = None  # optional — raises free rate limit
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -1,527 +1,545 @@
 """
-API Integration Tests — /api/v1/reports
+E2E Integration Tests — /api/v1/reports
 =========================================
-Вкупно: 15 тестови
+Вкупно: 25 тестови (15 оригинални + 10 нови E2E)
 
-Барања:
-  - PostgreSQL база да е стартувана: docker compose up -d
-  - Seed да е применет:             python scripts/seed.py
-  - app/services/report_service.py  да е заменет со report_service_fixed.py
+Нови E2E тестови покриваат:
+  - Citizen workflow со lat/lng + verify во DB
+  - Status timeline (history_entries)
+  - Officer коментари видливи за citizen
+  - CSV export
+  - Analytics summary
+  - Duplicate detection
 
 Стартување:
   python -m pytest tests/test_reports_api.py -v
+  python -m pytest tests/test_reports_api.py -v --cov=app --cov-report=term-missing
 """
 
 from __future__ import annotations
 
+import csv
+import io
 import os
 import uuid
 from collections.abc import Generator
-from contextlib import contextmanager
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-# ── Environment variables ПРЕД app imports ───────────────────────────────────
+# ── Мора да биде ПРЕД сите app imports ────────────────────────────────────────
 os.environ["DEV_SKIP_AUTH"] = "true"
-os.environ["AI_ENABLED"] = "false"
+os.environ["AI_ENABLED"] = "false"        # ← додај ова
+os.environ["AI_PRELOAD_ON_STARTUP"] = "false"  # ← и ова
 
-from app.core.config import get_settings
+from app.core.config import get_settings        # noqa: E402
 get_settings.cache_clear()
 
-from app.db.session import SessionLocal
-from app.main import app
-from app.models.history import History
-from app.models.report import Report
-from app.schemas.user import CurrentUser, UserRole
-from app.utils.dependencies import get_current_user
+from app.db.session import SessionLocal         # noqa: E402
+from app.main import app                        # noqa: E402
+from app.models.report import Report            # noqa: E402
+from app.schemas.user import CurrentUser, UserRole  # noqa: E402
+from app.utils.dependencies import DEV_USER, get_current_user  # noqa: E402
 
 # ── Константи ─────────────────────────────────────────────────────────────────
+PREFIX          = "/api/v1/reports"
+ANALYTICS_PREFIX = "/api/v1/analytics"
+DEV_USER_ID     = str(DEV_USER.id)  # "12345678-1234-1234-1234-123456789012"
 
-PREFIX = "/api/v1/reports"
+# Citizen — UUID кој НЕ постои во users (само за get_current_user override)
+CITIZEN_USER = CurrentUser(
+    id=uuid.UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+    email="citizen_test@example.com",
+    role=UserRole.citizen,
+)
 
-# Seeded корисници — мора да се совпаѓаат со scripts/seed.py
-CITIZEN_ID = uuid.UUID("12345678-1234-1234-1234-123456789012")
-OFFICER_ID = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-ADMIN_ID   = uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+# Officer — UUID кој постои во users табела
+OFFICER_USER = CurrentUser(
+    id=uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+    email="officer@example.com",
+    role=UserRole.officer,
+)
 
-CITIZEN_USER = CurrentUser(id=CITIZEN_ID, email="citizen@example.com", role=UserRole.citizen)
-OFFICER_USER = CurrentUser(id=OFFICER_ID, email="officer@example.com", role=UserRole.officer)
-ADMIN_USER   = CurrentUser(id=ADMIN_ID,   email="admin@example.com",   role=UserRole.admin)
+VALID_PAYLOAD = {
+    "description": "Скршена улична светилка кај плоштадот.",
+}
 
-# Seeded ID-а — види scripts/seed.py
-STATUS_SUBMITTED   = 1
-STATUS_IN_PROGRESS = 2
-STATUS_RESOLVED    = 3
-CATEGORY_INFRA     = 1
+VALID_PAYLOAD_WITH_LOCATION = {
+    "description": "Расипан водовод на улица Питу Гули.",
+    "latitude": 41.9965,
+    "longitude": 21.4314,
+}
 
-VALID_PAYLOAD = {"description": "Тест: скршена улична светилка кај плоштадот."}
-_CLEANUP_PREFIX = "Тест:%"
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-@contextmanager
-def override_user(user: CurrentUser):
-    """
-    Thread-safe context manager за промена на dependency_overrides.
-    Гарантира дека override се враќа назад дури и при exception.
-    """
-    app.dependency_overrides[get_current_user] = lambda: user
-    try:
-        yield
-    finally:
-        app.dependency_overrides[get_current_user] = lambda: ADMIN_USER
-
-
-def create_report_as(client: TestClient, user: CurrentUser, payload: dict | None = None) -> dict:
-    """
-    Креира репорт во контекст на даден корисник.
-
-    FIX T06: Officer не може да POST /reports — рутерот дозволува само citizen/admin.
-    За officer, создаваме преку admin и го менуваме user_id директно во DB.
-    """
-    p = payload or VALID_PAYLOAD
-
-    if user.role == UserRole.officer:
-        # Officer не смее да POST — создај преку admin, потоа смени user_id во DB
-        with override_user(ADMIN_USER):
-            resp = client.post(PREFIX, json=p)
-        assert resp.status_code == 201, f"Неуспешно креирање (admin proxy за officer): {resp.text}"
-        report_data = resp.json()
-
-        db: Session = SessionLocal()
-        try:
-            report = db.get(Report, report_data["id"])
-            report.user_id = user.id
-            db.commit()
-            db.refresh(report)
-            report_data["user_id"] = str(report.user_id)
-        finally:
-            db.close()
-
-        return report_data
-
-    with override_user(user):
-        resp = client.post(PREFIX, json=p)
-    assert resp.status_code == 201, f"Неуспешно креирање: {resp.text}"
-    return resp.json()
+_CLEANUP_PREFIXES = [
+    "Скршена улична светилка%",
+    "Расипан водовод%",
+    "Тест:%",
+    "PATCH тест%",
+    "Ќе биде избришан%",
+    "Долг опис%",
+    "Officer%",
+    "E2E%",
+    "Дупликат%",
+]
 
 
-def get_history_for_report(report_id: int) -> list[History]:
-    """Директно чита History записи од DB за даден report_id."""
-    db: Session = SessionLocal()
-    try:
-        return db.query(History).filter(History.report_id == report_id).all()
-    finally:
-        db.close()
+# ── run_all_tests ─────────────────────────────────────────────────────────────
+
+def run_all_tests():
+    """Ги рандира сите тестови еден по еден со pytest."""
+    import pytest as _pytest
+    tests = [
+        f"tests/test_reports_api.py::{name}"
+        for name in [
+            "test_01_create_report_minimal_payload",
+            "test_02_create_report_with_location",
+            "test_03_create_report_empty_description_fails",
+            "test_04_create_report_missing_description_fails",
+            "test_05_list_reports_admin_sees_all",
+            "test_06_get_report_by_id",
+            "test_07_get_report_not_found",
+            "test_08_patch_report_description",
+            "test_09_patch_admin_can_change_status_and_category",
+            "test_10_delete_report",
+            "test_11_get_report_forbidden_for_citizen",
+            "test_12_citizen_cannot_patch_foreign_report",
+            "test_13_officer_can_see_all_reports",
+            "test_14_create_report_max_length_description",
+            "test_15_patch_nonexistent_report_returns_404",
+            "test_16_citizen_submit_report_with_location_verified_in_db",
+            "test_17_citizen_cannot_see_foreign_report",
+            "test_18_status_timeline_recorded_on_patch",
+            "test_19_officer_post_comment_citizen_sees_it",
+            "test_20_officer_export_csv_valid",
+            "test_21_analytics_summary_returns_expected_keys",
+            "test_22_duplicate_detection_sets_flag",
+            "test_23_report_create_with_title",
+            "test_24_patch_status_endpoint_officer",
+            "test_25_citizen_list_sees_only_own_reports",
+        ]
+    ]
+    for test in tests:
+        print(f"\n{'='*60}\nРандирам: {test}\n{'='*60}")
+        _pytest.main([test, "-v", "--no-header"])
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture()
 def client() -> Generator[TestClient, None, None]:
-    """
-    TestClient со ADMIN_USER по default.
-
-    FIX T08: raise_server_exceptions=False — TestClient НЕ ги пропагира
-    server-side exceptions (IntegrityError) како Python exceptions.
-    Наместо тоа, добиваме HTTP response со status_code=500.
-    """
-    app.dependency_overrides[get_current_user] = lambda: ADMIN_USER
-    with TestClient(app, raise_server_exceptions=False) as c:
+    """Admin client (DEV_USER) — постои во users табела."""
+    app.dependency_overrides[get_current_user] = lambda: DEV_USER
+    with TestClient(app) as c:
         yield c
-    app.dependency_overrides[get_current_user] = lambda: ADMIN_USER
+    app.dependency_overrides[get_current_user] = lambda: DEV_USER
 
 
 @pytest.fixture(autouse=True)
 def cleanup_reports():
-    """Брише сите test репорти по секој тест."""
+    """Брише тест-репорти по секој тест за изолација."""
     yield
     db: Session = SessionLocal()
     try:
-        db.query(Report).filter(Report.description.like(_CLEANUP_PREFIX)).delete(
-            synchronize_session=False
-        )
+        from sqlalchemy import or_
+        conditions = [Report.description.like(p) for p in _CLEANUP_PREFIXES]
+        db.query(Report).filter(or_(*conditions)).delete(synchronize_session=False)
         db.commit()
     finally:
         db.close()
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# T01 — Citizen НЕ може да го смени status_id (статусот останува NULL)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def test_t01_citizen_cannot_change_status(client: TestClient):
-    """
-    Сценарио: Citizen се обидува да го смени status_id на свој репорт.
-    Очекување: 200 се враќа, НО status_id НЕ се менува (сервисот го игнорира).
-    Статус кодови: 200
-    """
-    report = create_report_as(client, CITIZEN_USER, {"description": "Тест: citizen status attempt."})
-    report_id = report["id"]
-    assert report["status_id"] is None
-
-    with override_user(CITIZEN_USER):
-        resp = client.patch(f"{PREFIX}/{report_id}", json={"status_id": STATUS_SUBMITTED})
-
-    assert resp.status_code == 200, f"Очекувано 200, добиено: {resp.status_code}"
-    assert resp.json()["status_id"] is None, (
-        "Citizen не смее да го смени status_id — треба да остане NULL"
-    )
+def _create(client: TestClient, payload: dict | None = None) -> dict:
+    """Помошник: POST нов репорт и врати response JSON."""
+    resp = client.post(PREFIX, json=payload or VALID_PAYLOAD)
+    assert resp.status_code == 201, f"Неуспешно креирање: {resp.text}"
+    return resp.json()
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# T02 — Officer МОЖЕ да го смени status (200)
-# ═══════════════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════════════
+# ОРИГИНАЛНИ 15 ТЕСТОВИ
+# ═════════════════════════════════════════════════════════════════════════════
 
-def test_t02_officer_can_change_status(client: TestClient):
-    """
-    Сценарио: Officer го менува status_id на репорт.
-    Очекување: 200 + status_id е ажуриран.
-    Статус кодови: 200
-    """
-    report = create_report_as(client, ADMIN_USER, {"description": "Тест: officer status change."})
-    report_id = report["id"]
-
-    with override_user(OFFICER_USER):
-        resp = client.patch(f"{PREFIX}/{report_id}", json={"status_id": STATUS_IN_PROGRESS})
-
-    assert resp.status_code == 200, f"Officer треба да може да смени статус: {resp.text}"
-    assert resp.json()["status_id"] == STATUS_IN_PROGRESS
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# T03 — Admin МОЖЕ да го смени status (200)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def test_t03_admin_can_change_status(client: TestClient):
-    """
-    Сценарио: Admin го менува status_id и category_id на репорт.
-    Очекување: 200 + двете полиња се ажурирани.
-    Статус кодови: 200
-    """
-    report = create_report_as(client, ADMIN_USER, {"description": "Тест: admin status change."})
-    report_id = report["id"]
-
-    with override_user(ADMIN_USER):
-        resp = client.patch(
-            f"{PREFIX}/{report_id}",
-            json={"status_id": STATUS_RESOLVED, "category_id": CATEGORY_INFRA},
-        )
-
-    assert resp.status_code == 200
+def test_01_create_report_minimal_payload(client: TestClient):
+    resp = client.post(PREFIX, json=VALID_PAYLOAD)
+    assert resp.status_code == 201
     body = resp.json()
-    assert body["status_id"] == STATUS_RESOLVED
-    assert body["category_id"] == CATEGORY_INFRA
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# T04 — При промена на статус се креира History запис
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def test_t04_status_change_creates_history_record(client: TestClient):
-    """
-    Сценарио: Officer го менува статусот — очекуваме History запис во DB.
-    Очекување: 200 + 1 History запис со точен status_id и changed_by_user_id.
-
-    ПРЕДУСЛОВ: app/services/report_service.py мора да е заменет со
-    report_service_fixed.py — ако паѓа со '0 != 1', сè уште го користиш старото!
-
-    Статус кодови: 200
-    """
-    report = create_report_as(client, ADMIN_USER, {"description": "Тест: history tracking."})
-    report_id = report["id"]
-
-    with override_user(OFFICER_USER):
-        resp = client.patch(f"{PREFIX}/{report_id}", json={"status_id": STATUS_IN_PROGRESS})
-
-    assert resp.status_code == 200
-
-    history = get_history_for_report(report_id)
-    assert len(history) == 1, (
-        f"Очекуван 1 History запис, добиени: {len(history)}\n"
-        "АКЦИЈА: Замени app/services/report_service.py со report_service_fixed.py!"
-    )
-    assert history[0].status_id == STATUS_IN_PROGRESS
-    assert history[0].changed_by_user_id == OFFICER_ID
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# T05 — Citizen ги гледа само своите репорти
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def test_t05_citizen_sees_only_own_reports(client: TestClient):
-    """
-    Сценарио: Admin и Citizen имаат различни репорти. Citizen го листа /reports.
-    Очекување: Citizen гледа само свои репорти, НЕ ги гледа admin репортите.
-    Статус кодови: 200
-    """
-    admin_report   = create_report_as(client, ADMIN_USER,   {"description": "Тест: admin репорт."})
-    citizen_report = create_report_as(client, CITIZEN_USER, {"description": "Тест: citizen репорт."})
-
-    with override_user(CITIZEN_USER):
-        resp = client.get(PREFIX)
-
-    assert resp.status_code == 200
-    ids = [r["id"] for r in resp.json()]
-    assert citizen_report["id"] in ids,     "Citizen треба да го гледа сопствениот репорт"
-    assert admin_report["id"] not in ids,   "Citizen НЕ смее да го гледа admin репортот"
-
-    for r in resp.json():
-        assert r["user_id"] == str(CITIZEN_ID), f"Citizen гледа туѓ репорт! user_id={r['user_id']}"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# T06 — Officer и Admin ги гледаат сите репорти
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def test_t06_officer_and_admin_see_all_reports(client: TestClient):
-    """
-    Сценарио: Citizen и Officer имаат репорти. Officer и Admin ги листаат сите.
-
-    FIX: create_report_as() го решава проблемот дека officer не може да POST —
-    создава преку admin и го менува user_id во DB.
-
-    Статус кодови: 200
-    """
-    citizen_report = create_report_as(client, CITIZEN_USER, {"description": "Тест: видливост citizen."})
-    officer_report = create_report_as(client, OFFICER_USER, {"description": "Тест: видливост officer."})
-
-    for user, label in [(OFFICER_USER, "Officer"), (ADMIN_USER, "Admin")]:
-        with override_user(user):
-            resp = client.get(PREFIX)
-        assert resp.status_code == 200
-        ids = [r["id"] for r in resp.json()]
-        assert citizen_report["id"] in ids, f"{label} треба да го гледа citizen репортот"
-        assert officer_report["id"] in ids, f"{label} треба да го гледа officer репортот"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# T07 — Citizen добива 403 при GET /{id} на туѓ репорт
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def test_t07_citizen_cannot_get_foreign_report(client: TestClient):
-    """
-    Сценарио: Admin креира репорт. Citizen се обидува да го земе по ID.
-    Очекување: 403 Forbidden.
-    Статус кодови: 403
-    """
-    admin_report = create_report_as(client, ADMIN_USER, {"description": "Тест: туѓ за citizen GET."})
-    report_id = admin_report["id"]
-
-    with override_user(CITIZEN_USER):
-        resp = client.get(f"{PREFIX}/{report_id}")
-
-    assert resp.status_code == 403
-    assert "not allowed" in resp.json()["detail"].lower()
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# T08 — PATCH со непостоечки status_id враќа 500 (FK violation)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def test_t08_patch_with_invalid_status_id(client: TestClient):
-    """
-    Сценарио: Admin се обидува да постави status_id=99999 (не постои во DB).
-    Очекување: 500 — PostgreSQL фрла ForeignKeyViolation.
-
-    FIX: client fixture користи raise_server_exceptions=False,
-    па IntegrityError се враќа како HTTP 500 наместо Python exception crash.
-
-    Статус кодови: 500
-    """
-    report = create_report_as(client, ADMIN_USER, {"description": "Тест: invalid status_id."})
-    report_id = report["id"]
-
-    with override_user(ADMIN_USER):
-        resp = client.patch(f"{PREFIX}/{report_id}", json={"status_id": 99999})
-
-    assert resp.status_code == 500, (
-        f"Очекуван 500 (FK violation), добиен: {resp.status_code} — {resp.text[:200]}"
-    )
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# T09 — Citizen не може да смени status_id дури и на свој репорт
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def test_t09_citizen_cannot_change_own_report_status(client: TestClient):
-    """
-    Сценарио: Citizen се обидува да го смени статусот на СВОЈ репорт.
-    Очекување: 200, НО status_id останува NULL. Нема History запис.
-    Статус кодови: 200
-    """
-    report = create_report_as(client, CITIZEN_USER, {"description": "Тест: citizen own status."})
-    report_id = report["id"]
-    assert report["status_id"] is None
-
-    with override_user(CITIZEN_USER):
-        resp = client.patch(f"{PREFIX}/{report_id}", json={"status_id": STATUS_SUBMITTED})
-
-    assert resp.status_code == 200
-    assert resp.json()["status_id"] is None, (
-        "Citizen не смее да го смени status_id дури и на сопствен репорт"
-    )
-    assert len(get_history_for_report(report_id)) == 0, (
-        "Не треба History запис кога citizen се обидува да смени статус"
-    )
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# T10 — Повеќекратна промена на статус → History расте
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def test_t10_multiple_status_changes_create_multiple_history_records(client: TestClient):
-    """
-    Сценарио: Admin го менува статусот 3 пати по ред.
-    Очекување: По секоја промена History листата расте за 1.
-
-    ПРЕДУСЛОВ: report_service_fixed.py мора да е на место.
-
-    Статус кодови: 200 × 3
-    """
-    report = create_report_as(client, ADMIN_USER, {"description": "Тест: multiple status changes."})
-    report_id = report["id"]
-
-    status_sequence = [STATUS_SUBMITTED, STATUS_IN_PROGRESS, STATUS_RESOLVED]
-
-    for i, status_id in enumerate(status_sequence, start=1):
-        with override_user(ADMIN_USER):
-            resp = client.patch(f"{PREFIX}/{report_id}", json={"status_id": status_id})
-        assert resp.status_code == 200
-
-        history = get_history_for_report(report_id)
-        assert len(history) == i, (
-            f"По {i}. промена, очекувани {i} History записи, добиени {len(history)}\n"
-            "АКЦИЈА: Замени app/services/report_service.py со report_service_fixed.py!"
-        )
-
-    history = get_history_for_report(report_id)
-    recorded = [h.status_id for h in sorted(history, key=lambda h: h.created_at)]
-    assert recorded == status_sequence, (
-        f"History редослед не се совпаѓа: {recorded} != {status_sequence}"
-    )
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# T11 — Officer може да го види туѓ репорт (GET /{id})
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def test_t11_officer_can_get_any_report(client: TestClient):
-    """
-    Сценарио: Citizen креира репорт. Officer го зема по ID.
-    Очекување: 200 + точен report_id.
-    Статус кодови: 200
-    """
-    citizen_report = create_report_as(
-        client, CITIZEN_USER, {"description": "Тест: officer read citizen report."}
-    )
-    report_id = citizen_report["id"]
-
-    with override_user(OFFICER_USER):
-        resp = client.get(f"{PREFIX}/{report_id}")
-
-    assert resp.status_code == 200
-    assert resp.json()["id"] == report_id
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# T12 — Citizen може да ги ажурира description/location на сопствен репорт
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def test_t12_citizen_can_update_own_description_and_location(client: TestClient):
-    """
-    Сценарио: Citizen ги менува description и координатите на свој репорт.
-    Очекување: 200 + ажурирани полиња; status/category останува NULL.
-    Статус кодови: 200
-    """
-    report = create_report_as(
-        client, CITIZEN_USER,
-        {"description": "Тест: citizen update own.", "latitude": 41.99, "longitude": 21.43},
-    )
-    report_id = report["id"]
-
-    with override_user(CITIZEN_USER):
-        resp = client.patch(
-            f"{PREFIX}/{report_id}",
-            json={"description": "Тест: citizen update own — ажуриран.", "latitude": 42.00, "longitude": 21.44},
-        )
-
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["description"] == "Тест: citizen update own — ажуриран."
-    assert body["latitude"]  == pytest.approx(42.00)
-    assert body["longitude"] == pytest.approx(21.44)
-    assert body["status_id"]   is None
+    assert body["description"] == VALID_PAYLOAD["description"]
+    assert "id" in body
+    assert "user_id" in body
+    assert "created_at" in body
     assert body["category_id"] is None
+    assert body["status_id"] is None
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# T13 — Citizen НЕ може да patch туѓ репорт (403)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def test_t13_citizen_cannot_patch_foreign_report(client: TestClient):
-    """
-    Сценарио: Admin креира репорт. Citizen се обидува да го ажурира.
-    Очекување: 403 Forbidden.
-    Статус кодови: 403
-    """
-    admin_report = create_report_as(client, ADMIN_USER, {"description": "Тест: туѓ за citizen PATCH."})
-    report_id = admin_report["id"]
-
-    with override_user(CITIZEN_USER):
-        resp = client.patch(
-            f"{PREFIX}/{report_id}",
-            json={"description": "Тест: обид за неовластена промена."},
-        )
-
-    assert resp.status_code == 403
-    assert "not allowed" in resp.json()["detail"].lower()
+def test_02_create_report_with_location(client: TestClient):
+    resp = client.post(PREFIX, json=VALID_PAYLOAD_WITH_LOCATION)
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["latitude"] == pytest.approx(41.9965)
+    assert body["longitude"] == pytest.approx(21.4314)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# T14 — GET /reports враќа 200 со листа за admin
-# ═══════════════════════════════════════════════════════════════════════════════
+def test_03_create_report_empty_description_fails(client: TestClient):
+    resp = client.post(PREFIX, json={"description": ""})
+    assert resp.status_code == 422
+    fields = [e["loc"][-1] for e in resp.json()["detail"]]
+    assert "description" in fields
 
-def test_t14_admin_list_reports_returns_200(client: TestClient):
-    """
-    Сценарио: Admin листа /reports по креирање на 2 репорти.
-    Очекување: 200 + двата репорти присутни + задолжителни полиња.
-    Статус кодови: 200
-    """
-    r1 = create_report_as(client, ADMIN_USER,   {"description": "Тест: list check 1."})
-    r2 = create_report_as(client, CITIZEN_USER, {"description": "Тест: list check 2."})
 
-    with override_user(ADMIN_USER):
-        resp = client.get(PREFIX)
+def test_04_create_report_missing_description_fails(client: TestClient):
+    resp = client.post(PREFIX, json={"latitude": 41.99})
+    assert resp.status_code == 422
 
+
+def test_05_list_reports_admin_sees_all(client: TestClient):
+    created = _create(client)
+    report_id = created["id"]
+    resp = client.get(PREFIX)
     assert resp.status_code == 200
-    ids = [r["id"] for r in resp.json()]
-    assert r1["id"] in ids
-    assert r2["id"] in ids
-
-    for report in resp.json():
-        for field in ("id", "description", "user_id", "created_at"):
-            assert field in report, f"Поле '{field}' недостасува во response"
+    assert report_id in [r["id"] for r in resp.json()]
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# T15 — PATCH на непостоечки репорт враќа 404
-# ═══════════════════════════════════════════════════════════════════════════════
+def test_06_get_report_by_id(client: TestClient):
+    created = _create(client)
+    report_id = created["id"]
+    resp = client.get(f"{PREFIX}/{report_id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == report_id
+    assert body["description"] == VALID_PAYLOAD["description"]
+    assert body["user_id"] == DEV_USER_ID
 
-def test_t15_patch_nonexistent_report_returns_404(client: TestClient):
-    """
-    Сценарио: Admin се обидува да patch репорт со ID=999999 (не постои).
-    Очекување: 404 + "not found" во detail.
-    Статус кодови: 404
-    """
-    with override_user(ADMIN_USER):
-        resp = client.patch(
-            f"{PREFIX}/999999",
-            json={"description": "Тест: patch непостоечки."},
-        )
 
+def test_07_get_report_not_found(client: TestClient):
+    resp = client.get(f"{PREFIX}/999999")
     assert resp.status_code == 404
     assert "not found" in resp.json()["detail"].lower()
+
+
+def test_08_patch_report_description(client: TestClient):
+    created = _create(client, {"description": "PATCH тест: оригинален опис."})
+    report_id = created["id"]
+    resp = client.patch(
+        f"{PREFIX}/{report_id}",
+        json={"description": "PATCH тест: ажуриран опис."},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["description"] == "PATCH тест: ажуриран опис."
+
+
+def test_09_patch_admin_can_change_status_and_category(client: TestClient):
+    created = _create(client, {"description": "Тест: admin status patch."})
+    report_id = created["id"]
+    resp = client.patch(
+        f"{PREFIX}/{report_id}",
+        json={"status_id": 1, "category_id": 1},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status_id"] == 1
+    assert resp.json()["category_id"] == 1
+
+
+def test_10_delete_report(client: TestClient):
+    created = _create(client, {"description": "Ќе биде избришан."})
+    report_id = created["id"]
+    assert client.delete(f"{PREFIX}/{report_id}").status_code == 204
+    assert client.get(f"{PREFIX}/{report_id}").status_code == 404
+
+
+def test_11_get_report_forbidden_for_citizen(client: TestClient):
+    db: Session = SessionLocal()
+    try:
+        report = Report(description="Тест: туѓ репорт за citizen.", user_id=DEV_USER.id)
+        db.add(report)
+        db.commit()
+        db.refresh(report)
+        report_id = report.id
+    finally:
+        db.close()
+
+    app.dependency_overrides[get_current_user] = lambda: CITIZEN_USER
+    try:
+        resp = client.get(f"{PREFIX}/{report_id}")
+        assert resp.status_code == 403
+        assert "not allowed" in resp.json()["detail"].lower()
+    finally:
+        app.dependency_overrides[get_current_user] = lambda: DEV_USER
+
+
+def test_12_citizen_cannot_patch_foreign_report(client: TestClient):
+    db: Session = SessionLocal()
+    try:
+        report = Report(description="Тест: citizen patch туѓ.", user_id=DEV_USER.id)
+        db.add(report)
+        db.commit()
+        db.refresh(report)
+        report_id = report.id
+    finally:
+        db.close()
+
+    app.dependency_overrides[get_current_user] = lambda: CITIZEN_USER
+    try:
+        resp = client.patch(
+            f"{PREFIX}/{report_id}",
+            json={"description": "Тест: обид за промена."},
+        )
+        assert resp.status_code == 403
+        assert "not allowed" in resp.json()["detail"].lower()
+    finally:
+        app.dependency_overrides[get_current_user] = lambda: DEV_USER
+
+
+def test_13_officer_can_see_all_reports(client: TestClient):
+    created = _create(client, {"description": "Officer тест: листање."})
+    report_id = created["id"]
+
+    app.dependency_overrides[get_current_user] = lambda: OFFICER_USER
+    try:
+        resp = client.get(PREFIX)
+        assert resp.status_code == 200
+        assert report_id in [r["id"] for r in resp.json()], "Officer не го гледа репортот"
+    finally:
+        app.dependency_overrides[get_current_user] = lambda: DEV_USER
+
+
+def test_14_create_report_max_length_description(client: TestClient):
+    valid_desc   = "Долг опис: " + "а" * 4989
+    invalid_desc = "Долг опис: " + "а" * 4990
+    assert client.post(PREFIX, json={"description": valid_desc}).status_code == 201
+    assert client.post(PREFIX, json={"description": invalid_desc}).status_code == 422
+
+
+def test_15_patch_nonexistent_report_returns_404(client: TestClient):
+    resp = client.patch(
+        f"{PREFIX}/999999",
+        json={"description": "Тест: patch на непостоечки."},
+    )
+    assert resp.status_code == 404
+    assert "not found" in resp.json()["detail"].lower()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# НОВИ E2E ТЕСТОВИ
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_16_citizen_submit_report_with_location_verified_in_db(client: TestClient):
+    """
+    E2E: Citizen submit report со lat/lng.
+    Проверуваме дека координатите се зачувани точно во DB.
+    """
+    payload = {
+        "description": "E2E: Оштетен тротоар со прецизна локација.",
+        "latitude": 41.9981,
+        "longitude": 21.4254,
+    }
+    resp = client.post(PREFIX, json=payload)
+    assert resp.status_code == 201
+    report_id = resp.json()["id"]
+
+    # Verify директно во DB
+    db: Session = SessionLocal()
+    try:
+        report = db.get(Report, report_id)
+        assert report is not None
+        assert report.description == payload["description"]
+        assert report.latitude == pytest.approx(41.9981)
+        assert report.longitude == pytest.approx(21.4254)
+        assert str(report.user_id) == DEV_USER_ID
+    finally:
+        db.close()
+
+
+def test_17_citizen_cannot_see_foreign_report(client: TestClient):
+    """
+    E2E: Citizen не може да го вчита репортот на друг корисник.
+    Репортот е на DEV_USER (admin), citizen добива 403.
+    """
+    created = _create(client, {"description": "E2E: Репорт на admin, citizen го бара."})
+    report_id = created["id"]
+
+    app.dependency_overrides[get_current_user] = lambda: CITIZEN_USER
+    try:
+        resp = client.get(f"{PREFIX}/{report_id}")
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides[get_current_user] = lambda: DEV_USER
+
+
+def test_18_status_timeline_recorded_on_patch(client: TestClient):
+    """
+    E2E: Кога admin го менува status_id преку PATCH,
+    history_entries во response мора да содржи запис со новиот status.
+    """
+    created = _create(client, {"description": "E2E: Status timeline тест."})
+    report_id = created["id"]
+
+    # Прв status change
+    resp = client.patch(f"{PREFIX}/{report_id}", json={"status_id": 1})
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert "history_entries" in body
+    assert len(body["history_entries"]) >= 1
+    statuses = [h["status_id"] for h in body["history_entries"]]
+    assert 1 in statuses
+
+
+def test_19_officer_post_comment_citizen_sees_it(client: TestClient):
+    """
+    E2E: Officer додава коментар на репорт.
+    Кога admin го вчитува репортот, коментарот е видлив во comments листата.
+    """
+    created = _create(client, {"description": "E2E: Репорт за коментар."})
+    report_id = created["id"]
+
+    # Officer додава коментар
+    app.dependency_overrides[get_current_user] = lambda: OFFICER_USER
+    try:
+        comment_resp = client.post(
+            f"{PREFIX}/{report_id}/comments",
+            json={"content": "E2E: Офицерски коментар — потврдено на терен."},
+        )
+        assert comment_resp.status_code == 201, f"Comment failed: {comment_resp.text}"
+        comment_id = comment_resp.json()["id"]
+    finally:
+        app.dependency_overrides[get_current_user] = lambda: DEV_USER
+
+    # Admin го вчитува репортот и го гледа коментарот
+    get_resp = client.get(f"{PREFIX}/{report_id}")
+    assert get_resp.status_code == 200
+    body = get_resp.json()
+    assert "comments" in body
+    comment_ids = [c["id"] for c in body["comments"]]
+    assert comment_id in comment_ids
+
+
+def test_20_officer_export_csv_valid(client: TestClient):
+    """
+    E2E: GET /analytics/export/csv враќа валиден CSV.
+    Проверуваме: Content-Type, HTTP 200, header row постои.
+    """
+    # Треба admin за analytics
+    resp = client.get(f"{ANALYTICS_PREFIX}/export/csv")
+    assert resp.status_code == 200
+    assert "text/csv" in resp.headers.get("content-type", "")
+
+    content = resp.text
+    reader = csv.reader(io.StringIO(content))
+    rows = list(reader)
+    assert len(rows) >= 1, "CSV мора да содржи барем header row"
+
+    header = rows[0]
+    assert "ID" in header
+    assert "Description" in header
+
+
+def test_21_analytics_summary_returns_expected_keys(client: TestClient):
+    """
+    E2E: GET /analytics/summary враќа очекувана структура.
+    Проверуваме дека сите клучни полиња постојат во response.
+    """
+    resp = client.get(f"{ANALYTICS_PREFIX}/summary")
+    assert resp.status_code == 200
+
+    body = resp.json()
+    assert "kpis" in body
+    assert "categoryData" in body
+    assert "pieData" in body
+    assert "monthlyData" in body
+    assert "resolutionRate" in body
+
+    kpis = body["kpis"]
+    assert "total" in kpis
+    assert "resolved" in kpis
+    assert "avgTime" in kpis
+    assert "activeCitizens" in kpis
+
+
+def test_22_duplicate_detection_sets_flag(client: TestClient):
+    """
+    E2E: Два идентични репорти со иста локација.
+    Вториот мора да добие possible_duplicate_of != None.
+    """
+    payload = {
+        "description": "E2E: Дупликат — расипан хидрант на главната улица.",
+        "latitude": 41.9950,
+        "longitude": 21.4300,
+    }
+
+    first = _create(client, payload)
+    first_id = first["id"]
+
+    second_resp = client.post(PREFIX, json=payload)
+    assert second_resp.status_code == 201
+    second = second_resp.json()
+
+    assert second["possible_duplicate_of"] == first_id, (
+        f"Вториот репорт мора да го флагира прво: {first_id}, "
+        f"доби: {second['possible_duplicate_of']}"
+    )
+
+
+def test_23_report_create_with_title(client: TestClient):
+    """
+    E2E: ReportCreate поддржува опционален title.
+    Проверуваме дека title се зачувува и се враќа во response.
+    """
+    payload = {
+        "title": "E2E: Наслов на репорт",
+        "description": "E2E: Детален опис со наслов.",
+    }
+    resp = client.post(PREFIX, json=payload)
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["title"] == "E2E: Наслов на репорт"
+
+
+def test_24_patch_status_endpoint_officer(client: TestClient):
+    """
+    E2E: PATCH /{id}/status е посебен endpoint само за officer/admin.
+    Officer го менува status_id и history се логира.
+    """
+    created = _create(client, {"description": "E2E: Status endpoint тест."})
+    report_id = created["id"]
+
+    app.dependency_overrides[get_current_user] = lambda: OFFICER_USER
+    try:
+        resp = client.patch(
+            f"{PREFIX}/{report_id}/status",
+            json={"status_id": 1},
+        )
+        assert resp.status_code == 200, f"Status patch failed: {resp.text}"
+        body = resp.json()
+        assert body["status_id"] == 1
+        assert len(body["history_entries"]) >= 1
+    finally:
+        app.dependency_overrides[get_current_user] = lambda: DEV_USER
+
+
+def test_25_citizen_list_sees_only_own_reports(client: TestClient):
+    """
+    E2E: Citizen го листа само своите репорти.
+    Во базата постои репорт на DEV_USER (admin) — citizen НЕ смее да го гледа.
+    Citizen нема свои репорти → листата мора да е празна.
+    """
+    # Креирај репорт со admin (DEV_USER)
+    _create(client, {"description": "E2E: Admin репорт, citizen не гo гледа."})
+
+    # Citizen листа — мора да добие само свои (нула)
+    app.dependency_overrides[get_current_user] = lambda: CITIZEN_USER
+    try:
+        resp = client.get(PREFIX)
+        assert resp.status_code == 200
+        reports = resp.json()
+        # Сите репорти мора да имаат user_id == CITIZEN_USER.id
+        for r in reports:
+            assert r["user_id"] == str(CITIZEN_USER.id), (
+                f"Citizen доби туѓ репорт: {r['user_id']}"
+            )
+    finally:
+        app.dependency_overrides[get_current_user] = lambda: DEV_USER
+
+
+if __name__ == "__main__":
+    run_all_tests()

@@ -20,6 +20,7 @@ class ReportCreate(ReportBase):
     but the user can optionally suggest one.
     """
     category_id: int | None = None
+    priority: str | None = None
 
 
 class ReportUpdate(BaseModel):

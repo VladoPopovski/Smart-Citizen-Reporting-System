@@ -73,6 +73,7 @@ def create_report(db: Session, *, report_in: ReportCreate, current_user: Current
         user_id=current_user.id,
         category_id=category_id,
         possible_duplicate_of=possible_duplicate_of,
+        priority=report_in.priority,
     )
     db.add(report)
     db.commit()
@@ -85,6 +86,7 @@ def run_report_ai_pipeline(report_id: int) -> None:
     Background AI pipeline for a report:
     - classify description -> set category_id (if still NULL)
     - generate a confirmation message (optional persisted comment)
+    - generate Macedonian AI confirmation (FR-03)
 
     This must never raise: report creation should not fail due to AI.
     """
@@ -116,7 +118,7 @@ def run_report_ai_pipeline(report_id: int) -> None:
         predicted_label: str | None = None
         category_changed = False
 
-        # Only auto-assign when the report still has no category (do not override user/admin updates).
+        # Only auto-assign when the report still has no category.
         if report.category_id is None and candidate_labels:
             try:
                 predicted_label = classify_text(
@@ -164,6 +166,7 @@ def run_report_ai_pipeline(report_id: int) -> None:
         if category_changed:
             db.commit()
 
+        # Resolve category name for messages (after classification is settled)
         category_label_for_message: str | None = None
         if report.category_id is not None:
             category_label_for_message = next(
@@ -171,69 +174,34 @@ def run_report_ai_pipeline(report_id: int) -> None:
                 None,
             )
 
-            # --- existing confirmation message (English comment, kept as-is) ---
-            category_label_for_message: str | None = None
-            if report.category_id is not None:
-                category_label_for_message = next(
-                    (c.name for c in categories_sorted if c.id == report.category_id),
-                    None,
-                )
+        # --- English confirmation (existing) ---
+        message = generate_confirmation_message(
+            report.description,
+            category_label=category_label_for_message,
+            possible_duplicate_of=report.possible_duplicate_of,
+        )
 
-            message = generate_confirmation_message(
+        # AI-generated Macedonian confirmation (with priority)
+
+        try:
+            mk_text = generate_confirmation_mk(
                 report.description,
                 category_label=category_label_for_message,
+                priority=report.priority,                      # ← CR-02
                 possible_duplicate_of=report.possible_duplicate_of,
             )
+            report.ai_confirmation_text = mk_text
+            db.commit()
+            logger.info("ai_confirmation_text saved for report_id=%d", report_id)
+        except Exception:
+            logger.warning(
+                "Unexpected error saving ai_confirmation_text for report_id=%d — skipping.",
+                report_id,
+                exc_info=True,
+            )
+        # ------------------------------------------------------------------ #
 
-            # ------------------------------------------------------------------ #
-            # FR-03: AI-generated Macedonian confirmation                         #
-            # Runs here (still in background thread) — never blocks API response  #
-            # ------------------------------------------------------------------ #
-            try:
-                mk_text = generate_confirmation_mk(
-                    report.description,
-                    category_label=category_label_for_message,
-                    possible_duplicate_of=report.possible_duplicate_of,
-                )
-                report.ai_confirmation_text = mk_text
-                db.commit()
-                logger.info(
-                    "FR-03: ai_confirmation_text saved for report_id=%d", report_id
-                )
-            except Exception:
-                # generate_confirmation_mk already catches internally;
-                # this outer guard is an extra safety net.
-                logger.warning(
-                    "FR-03: Unexpected error saving ai_confirmation_text for report_id=%d — skipping.",
-                    report_id,
-                    exc_info=True,
-                )
-            # ------------------------------------------------------------------ #
-
-            if message and settings.ai_confirmation_comment_user_id is not None:
-                existing = db.scalars(
-                    select(Comment)
-                    .where(Comment.report_id == report.id)
-                    .where(Comment.user_id == settings.ai_confirmation_comment_user_id)
-                ).first()
-                if existing is None:
-                    db.add(
-                        Comment(
-                            report_id=report.id,
-                            user_id=settings.ai_confirmation_comment_user_id,
-                            content=message,
-                        )
-                    )
-                    try:
-                        db.commit()
-                    except Exception:
-                        db.rollback()
-                        logger.warning(
-                            "AI confirmation persistence failed — skipping comment for report_id=%d.",
-                            report_id,
-                            exc_info=True,
-                        )
-
+        # --- Persist EN confirmation as a comment (optional) ---
         if message and settings.ai_confirmation_comment_user_id is not None:
             existing = db.scalars(
                 select(Comment)
@@ -264,7 +232,6 @@ def run_report_ai_pipeline(report_id: int) -> None:
         logger.warning("AI pipeline failed for report_id=%d — skipping.", report_id, exc_info=True)
     finally:
         db.close()
-
 
 def list_reports(db: Session, *, current_user: CurrentUser) -> list[ReportRead]:
     """Return reports filtered by role: citizens see only their own."""

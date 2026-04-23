@@ -10,9 +10,12 @@ surprise model downloads during test runs.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import logging
+import re
 import threading
+from time import monotonic, perf_counter
 
 from transformers import pipeline
 
@@ -22,6 +25,50 @@ logger = logging.getLogger(__name__)
 
 _classifier_lock = threading.Lock()
 _classifier = None
+
+_classification_cache_lock = threading.Lock()
+_classification_cache: dict[tuple[str, tuple[str, ...], float | None], "_ClassificationCacheEntry"] = {}
+
+
+@dataclass(frozen=True)
+class _ClassificationCacheEntry:
+    label: str
+    expires_at_monotonic: float
+
+
+def _normalize_text_cache_key(text: str) -> str:
+    # Keep key reasonably stable across superficial user input differences.
+    compacted = re.sub(r"\s+", " ", text).strip()
+    return compacted.casefold()
+
+
+def _classification_cache_get(
+    *,
+    key: tuple[str, tuple[str, ...], float | None],
+    now_monotonic: float,
+) -> str | None:
+    with _classification_cache_lock:
+        entry = _classification_cache.get(key)
+        if entry is None:
+            return None
+        if entry.expires_at_monotonic <= now_monotonic:
+            _classification_cache.pop(key, None)
+            return None
+        return entry.label
+
+
+def _classification_cache_set(
+    *,
+    key: tuple[str, tuple[str, ...], float | None],
+    label: str,
+    ttl_seconds: int,
+    now_monotonic: float,
+) -> None:
+    if ttl_seconds <= 0:
+        return
+    expires_at = now_monotonic + float(ttl_seconds)
+    with _classification_cache_lock:
+        _classification_cache[key] = _ClassificationCacheEntry(label=label, expires_at_monotonic=expires_at)
 
 
 def _get_classifier():
@@ -145,6 +192,8 @@ def classify_text(
     Returns:
         The top predicted category name, or None if classification fails.
     """
+    start = perf_counter()
+    cache_hit = False
     if not text or not candidate_labels:
         logger.warning("classify_text called with empty text or no candidate labels.")
         return None
@@ -152,6 +201,20 @@ def classify_text(
     settings = get_settings()
     if not settings.ai_enabled:
         return None
+
+    ttl_seconds = int(getattr(settings, "ai_cache_ttl_seconds", 0) or 0)
+    cache_key = (
+        _normalize_text_cache_key(text),
+        tuple(sorted(candidate_labels, key=str.casefold)),
+        float(min_confidence) if min_confidence is not None else None,
+    )
+    if ttl_seconds > 0:
+        cached = _classification_cache_get(key=cache_key, now_monotonic=monotonic())
+        if cached is not None:
+            cache_hit = True
+            elapsed_ms = (perf_counter() - start) * 1000
+            logger.info("AI classification latency: %.0fms (cache hit)", elapsed_ms)
+            return cached
 
     top_label = None
     try:
@@ -169,10 +232,286 @@ def classify_text(
             )
             top_label = None
     except Exception:
-        logger.exception("HuggingFace classification failed - trying OpenAI fallback.")
+        logger.warning(
+            "AI unavailable — skipping HuggingFace classification (trying OpenAI fallback).",
+            exc_info=True,
+        )
         top_label = None
 
     if top_label is not None:
+        if ttl_seconds > 0 and not cache_hit:
+            _classification_cache_set(
+                key=cache_key,
+                label=top_label,
+                ttl_seconds=ttl_seconds,
+                now_monotonic=monotonic(),
+            )
+        elapsed_ms = (perf_counter() - start) * 1000
+        logger.info("AI classification latency: %.0fms", elapsed_ms)
         return top_label
 
-    return _classify_text_openai(text, candidate_labels)
+    label = _classify_text_openai(text, candidate_labels)
+    if isinstance(label, str) and label and ttl_seconds > 0 and not cache_hit:
+        _classification_cache_set(
+            key=cache_key,
+            label=label,
+            ttl_seconds=ttl_seconds,
+            now_monotonic=monotonic(),
+        )
+
+    elapsed_ms = (perf_counter() - start) * 1000
+    logger.info("AI classification latency: %.0fms", elapsed_ms)
+    return label
+
+
+def generate_confirmation_message(
+    description: str,
+    *,
+    category_label: str | None = None,
+    possible_duplicate_of: int | None = None,
+) -> str | None:
+    """
+    Generate a short confirmation message for a newly created report.
+
+    Uses OpenAI when configured; otherwise returns a deterministic template.
+    """
+    start = perf_counter()
+    settings = get_settings()
+
+    template_parts: list[str] = ["Thanks for your report — we’ve received it and will review it shortly."]
+    if category_label:
+        template_parts.append(f"Initial category: {category_label}.")
+    if possible_duplicate_of is not None:
+        template_parts.append(f"This may be a duplicate of report #{possible_duplicate_of}; our team will review.")
+    template_message = " ".join(template_parts)
+
+    if not settings.ai_enabled:
+        elapsed_ms = (perf_counter() - start) * 1000
+        logger.info("AI confirmation generation latency: %.0fms (AI disabled)", elapsed_ms)
+        return template_message
+
+    if not settings.openai_api_key or not settings.ai_openai_fallback_enabled:
+        elapsed_ms = (perf_counter() - start) * 1000
+        logger.info("AI confirmation generation latency: %.0fms (template)", elapsed_ms)
+        return template_message
+
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=settings.openai_api_key, timeout=settings.ai_openai_timeout_seconds)
+        user_bits = [f"Description:\n{description.strip()}"]
+        if category_label:
+            user_bits.append(f"Category: {category_label}")
+        if possible_duplicate_of is not None:
+            user_bits.append(f"Possible duplicate of report id: {possible_duplicate_of}")
+
+        response = client.responses.create(
+            model=settings.ai_openai_model,
+            input=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You write short confirmation messages for a city report app. "
+                        "Be concise, friendly, and specific. Do not ask questions."
+                    ),
+                },
+                {"role": "user", "content": "\n".join(user_bits)},
+            ],
+        )
+        message = (response.output_text or "").strip()
+        if not message:
+            message = template_message
+
+        elapsed_ms = (perf_counter() - start) * 1000
+        logger.info("AI confirmation generation latency: %.0fms", elapsed_ms)
+        return message
+    except Exception:
+        logger.warning("AI confirmation generation failed — using template.", exc_info=True)
+        elapsed_ms = (perf_counter() - start) * 1000
+        logger.info("AI confirmation generation latency: %.0fms (template fallback)", elapsed_ms)
+        return template_message
+
+
+# ---------------------------------------------------------------------------
+# FR-03 / CR-02 — Macedonian confirmation via HuggingFace Inference API
+
+import requests as _requests
+
+# Maps English priority strings (free-text from DB) to Macedonian.
+_PRIORITY_MK: dict[str, str] = {
+    "low":      "низок",
+    "medium":   "среден",
+    "normal":   "среден",
+    "high":     "висок",
+    "urgent":   "итен",
+    "critical": "критичен",
+}
+
+
+def _priority_to_mk(priority: str | None) -> str | None:
+    """Translate a priority string to Macedonian. Returns None if unknown/missing."""
+    if not priority:
+        return None
+    return _PRIORITY_MK.get(priority.strip().lower())
+
+
+_MK_FALLBACK_TEMPLATE = (
+    "Вашата пријава е успешно примена и ќе биде разгледана наскоро."
+    "{category_part}"
+    "{priority_part}"
+    " Очекувајте одговор во рок од 3–5 работни дена."
+    "{duplicate_part}"
+    " Ви благодариме за придонесот кон подобрување на нашата заедница."
+)
+
+
+def _mk_fallback(
+    category_label: str | None,
+    priority: str | None,
+    possible_duplicate_of: int | None,
+) -> str:
+    category_part = (
+        f" Пријавата е класифицирана во категоријата: {category_label}."
+        if category_label
+        else ""
+    )
+    priority_mk = _priority_to_mk(priority)
+    priority_part = (
+        f" Приоритетот на пријавата е {priority_mk}."
+        if priority_mk
+        else (
+            f" Приоритет: {priority}."
+            if priority
+            else ""
+        )
+    )
+    duplicate_part = (
+        f" Забележавме дека оваа пријава може да е слична на пријава #{possible_duplicate_of};"
+        " нашиот тим ќе го разгледа тоа."
+        if possible_duplicate_of is not None
+        else ""
+    )
+    advice_part = (
+        " Ве советуваме да ја документирате состојбата со фотографии и да останете достапни за контакт."
+    )
+    return (
+        "Вашата пријава е успешно примена и ќе биде разгледана наскоро."
+        + category_part
+        + priority_part
+        + " Очекувајте одговор во рок од 3–5 работни дена."
+        + duplicate_part
+        + advice_part
+    )
+
+
+def _build_mk_prompt(
+    description: str,
+    category_label: str | None,
+    priority: str | None,
+    possible_duplicate_of: int | None,
+) -> str:
+    """Build a Mistral-instruct-format prompt that requests a Macedonian reply."""
+    priority_mk = _priority_to_mk(priority)
+    priority_display = priority_mk or priority  # use MK if known, raw otherwise
+
+    details: list[str] = [f"- Опис на пријавата: {description.strip()}"]
+    if category_label:
+        details.append(f"- Категорија: {category_label}")
+    if priority_display:
+        details.append(f"- Приоритет: {priority_display}")
+    if possible_duplicate_of is not None:
+        details.append(f"- Можна дупликат на пријава бр.: {possible_duplicate_of}")
+
+    instruction = (
+        "Ти си асистент на систем за управување со граѓански поплаки во македонски град. "
+        "Генерирај кратка потврдна порака НА МАКЕДОНСКИ ЈАЗИК за граѓанин кој поднел нова пријава.\n\n"
+        "Детали за пријавата:\n"
+        + "\n".join(details)
+        + "\n\n"
+        "Пораката МОРА да содржи (во 3–4 реченици):\n"
+        "1. Потврда дека пријавата е примена\n"
+        "2. Класификацијата и приоритетот на проблемот (ако се дадени) — "
+        "формулирај го вака: 'Вашата пријава е класифицирана како [категорија] со [приоритет] приоритет'\n"
+        "3. Очекуваниот тек / следни чекори\n"
+        "4. Краток совет за граѓанинот\n\n"
+        "Одговори САМО со пораката на македонски. Без воведни фрази, без објаснувања."
+    )
+    return f"<s>[INST] {instruction} [/INST]"
+
+
+def generate_confirmation_mk(
+    description: str,
+    *,
+    category_label: str | None = None,
+    priority: str | None = None,
+    possible_duplicate_of: int | None = None,
+) -> str:
+    """
+    FR-03 / CR-02: Generate a short AI confirmation message in Macedonian,
+    including category, priority, expected process and citizen advice.
+
+    Strategy:
+      1. Call HuggingFace Inference API (free) with Mistral-7B-Instruct.
+      2. On any failure → graceful fallback to deterministic MK template.
+      Never raises.
+    """
+    start = perf_counter()
+    settings = get_settings()
+
+    if not settings.ai_enabled:
+        logger.info("FR-03: AI disabled — using MK fallback template.")
+        return _mk_fallback(category_label, priority, possible_duplicate_of)
+
+    prompt = _build_mk_prompt(description, category_label, priority, possible_duplicate_of)
+
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if settings.hf_api_token:
+        headers["Authorization"] = f"Bearer {settings.hf_api_token}"
+
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 250,
+            "temperature": 0.6,
+            "top_p": 0.92,
+            "do_sample": True,
+            "return_full_text": False,
+            "stop": ["</s>", "[INST]"],
+        },
+    }
+
+    url = f"https://api-inference.huggingface.co/models/{settings.ai_hf_inference_model}"
+
+    try:
+        resp = _requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=settings.ai_hf_inference_timeout_seconds,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        if isinstance(data, list) and data and "generated_text" in data[0]:
+            text = data[0]["generated_text"].strip()
+        elif isinstance(data, dict) and "generated_text" in data:
+            text = data["generated_text"].strip()
+        else:
+            logger.warning("FR-03: Unexpected HF response shape: %r — using fallback.", data)
+            text = ""
+
+        if not text:
+            raise ValueError("Empty generated text from HF Inference API")
+
+        elapsed_ms = (perf_counter() - start) * 1000
+        logger.info("FR-03: MK confirmation generated via HF in %.0fms", elapsed_ms)
+        return text
+
+    except Exception:
+        elapsed_ms = (perf_counter() - start) * 1000
+        logger.warning(
+            "FR-03: HF Inference API failed (%.0fms) — using MK fallback template.",
+            elapsed_ms,
+            exc_info=True,
+        )
+        return _mk_fallback(category_label, priority, possible_duplicate_of)

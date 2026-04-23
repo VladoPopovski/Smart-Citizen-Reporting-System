@@ -6,17 +6,21 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class ReportCreate(BaseModel):
-    """
-    Input schema for creating a report.
-
-    Category/status are intentionally omitted here; the system can assign them later
-    (e.g., via AI classification + workflow rules).
-    """
-
-    description: str = Field(min_length=1, max_length=5000)
+class ReportBase(BaseModel):
+    description: str = Field(..., min_length=1, max_length=5000)
     latitude: float | None = None
     longitude: float | None = None
+
+
+class ReportCreate(ReportBase):
+    title: str | None = None
+    """
+    Schema used when creating a new report.
+    Category and status are assigned later by the system,
+    but the user can optionally suggest one.
+    """
+    category_id: int | None = None
+    priority: str | None = None
 
 
 class ReportUpdate(BaseModel):
@@ -27,17 +31,50 @@ class ReportUpdate(BaseModel):
     status_id: int | None = None
 
 
-class ReportRead(BaseModel):
-    """Output schema for report responses."""
+class StatusUpdate(BaseModel):
+    status_id: int
+
+
+class CommentCreate(BaseModel):
+    content: str = Field(..., min_length=1, max_length=2000)
+
+
+class CommentRead(BaseModel):
+    """Schema returned for report comments."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    description: str
-    category_id: int | None = None
-    status_id: int | None = None
     user_id: UUID
-    latitude: float | None = None
-    longitude: float | None = None
+    content: str
     created_at: datetime
 
+
+class HistoryRead(BaseModel):
+    """Schema returned for report history entries."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    old_status_id: int | None = None
+    status_id: int | None = None
+    changed_by_user_id: UUID | None = None
+    created_at: datetime
+
+
+class ReportRead(ReportBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str | None = None
+    priority: str | None = None
+    category_id: int | None = None
+    status_id: int | None = None
+    department_id: int | None = None
+    user_id: UUID
+    created_at: datetime
+    updated_at: datetime
+    possible_duplicate_of: int | None = None
+    ai_confirmation_text: str | None = None
+    history_entries: list[HistoryRead] = []
+    comments: list[CommentRead] = []

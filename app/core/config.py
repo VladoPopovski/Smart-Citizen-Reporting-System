@@ -1,4 +1,5 @@
 from functools import lru_cache
+from uuid import UUID
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -33,6 +34,7 @@ class Settings(BaseSettings):
     # 0 disables the threshold (always accept the top label).
     ai_min_confidence: float = 0.0
     ai_default_category_name: str = "Other"
+    ai_cache_ttl_seconds: int = 300
 
     # HuggingFace zero-shot classification defaults
     ai_hf_model: str = "facebook/bart-large-mnli"
@@ -44,6 +46,17 @@ class Settings(BaseSettings):
     ai_openai_model: str = "gpt-4o-mini"
     ai_openai_timeout_seconds: float = 15.0
     openai_api_key: str | None = None
+
+    # Optional: persist an AI-generated confirmation message as a Comment.
+    # Must reference an existing user UUID in the `users` table.
+    ai_confirmation_comment_user_id: UUID | None = None
+
+    # --- HuggingFace Inference API for Macedonian confirmation ---
+    # Free tier: https://huggingface.co/inference-api
+    # Add HF_API_TOKEN to your environment for higher rate limits (free account).
+    ai_hf_inference_model: str = "mistralai/Mistral-7B-Instruct-v0.2"
+    ai_hf_inference_timeout_seconds: float = 30.0
+    hf_api_token: str | None = None  # optional — raises free rate limit
 
 
 @lru_cache

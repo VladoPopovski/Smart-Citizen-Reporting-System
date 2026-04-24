@@ -1,14 +1,20 @@
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, File, UploadFile
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.schemas.attachment import AttachmentRead
 from app.schemas.report import CommentCreate, CommentRead, ReportCreate, ReportRead, ReportUpdate, StatusUpdate
 from app.schemas.user import CurrentUser, UserRole
 from app.services import report_service
 from app.utils.dependencies import get_current_user, require_roles
+from app.utils.file_upload import save_upload
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
+
+# ---------------------------------------------------------------------------
+# Reports
+# ---------------------------------------------------------------------------
 
 @router.post("", response_model=ReportRead, status_code=201)
 def create_report(
@@ -28,12 +34,7 @@ def list_reports(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> list[ReportRead]:
-    """
-    List reports.
-
-    - Citizens see only their own reports.
-    - Officers and admins see all reports.
-    """
+    """Citizens see only their own. Officers and admins see all."""
     return report_service.list_reports(db, current_user=current_user)
 
 
@@ -54,12 +55,7 @@ def update_report(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> ReportRead:
-    """
-    Update a report.
-
-    - Citizens can update description/location of their own reports only.
-    - Officers and admins can update any report, including category and status.
-    """
+    """Citizens update their own only. Officers/admins update any."""
     return report_service.update_report(db, report_id=report_id, report_in=report_in, current_user=current_user)
 
 
@@ -84,6 +80,20 @@ def delete_report(
     report_service.delete_report(db, report_id=report_id, current_user=current_user)
 
 
+# ---------------------------------------------------------------------------
+# Comments
+# ---------------------------------------------------------------------------
+
+@router.get("/{report_id}/comments", response_model=list[CommentRead])
+def list_comments(
+    report_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> list[CommentRead]:
+    """Get all comments on a report. Citizens can only view their own reports' comments."""
+    return report_service.list_comments(db, report_id=report_id, current_user=current_user)
+
+
 @router.post("/{report_id}/comments", response_model=CommentRead, status_code=201)
 def create_comment(
     report_id: int,
@@ -91,5 +101,39 @@ def create_comment(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin)),
 ) -> CommentRead:
-    """Add a comment to a report. Officers and admins only."""
+    """Add a comment. Officers and admins only. Triggers notification to report owner."""
     return report_service.create_comment(db, report_id=report_id, comment_in=comment_in, current_user=current_user)
+
+
+# ---------------------------------------------------------------------------
+# Attachments
+# ---------------------------------------------------------------------------
+
+@router.get("/{report_id}/attachments", response_model=list[AttachmentRead])
+def list_attachments(
+    report_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> list[AttachmentRead]:
+    """Get all attachments on a report. Citizens can only view their own reports'."""
+    return report_service.list_attachments(db, report_id=report_id, current_user=current_user)
+
+
+@router.post("/{report_id}/attachments", response_model=AttachmentRead, status_code=201)
+async def upload_attachment(
+    report_id: int,
+    file: UploadFile = File(..., description="JPG, PNG or PDF. Max 5 MB."),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin)),
+) -> AttachmentRead:
+    """Upload evidence to a report. Officers and admins only. Validates type and size."""
+    file_url, file_size_bytes = await save_upload(file)
+    return report_service.create_attachment(
+        db,
+        report_id=report_id,
+        file_url=file_url,
+        original_filename=file.filename or "unknown",
+        content_type=file.content_type or "application/octet-stream",
+        file_size_bytes=file_size_bytes,
+        current_user=current_user,
+    )

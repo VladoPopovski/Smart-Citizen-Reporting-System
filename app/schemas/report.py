@@ -20,6 +20,7 @@ class ReportCreate(ReportBase):
     but the user can optionally suggest one.
     """
     category_id: int | None = None
+    priority: str | None = None
 
 
 class ReportUpdate(BaseModel):
@@ -74,5 +75,6 @@ class ReportRead(ReportBase):
     created_at: datetime
     updated_at: datetime
     possible_duplicate_of: int | None = None
+    ai_confirmation_text: str | None = None
     history_entries: list[HistoryRead] = []
     comments: list[CommentRead] = []

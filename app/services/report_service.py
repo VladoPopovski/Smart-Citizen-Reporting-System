@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from time import perf_counter
 from uuid import UUID
-
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -12,15 +11,16 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
+from app.models.attachment import Attachment
 from app.models.category import Category
 from app.models.history import History
 from app.models.report import Report
 from app.models.comment import Comment
+from app.schemas.attachment import AttachmentRead
 from app.schemas.report import CommentCreate, CommentRead, ReportCreate, ReportRead, ReportUpdate, StatusUpdate
 from app.schemas.user import CurrentUser, UserRole
 from app.services.ai_service import classify_text, generate_confirmation_message, generate_confirmation_mk
 from app.utils.duplicate_detection import check_duplicate
-
 
 logger = logging.getLogger(__name__)
 
@@ -30,21 +30,20 @@ def _normalize_category_key(value: str) -> str:
 
 
 def _classifier_label_for_category(category_name: str) -> str:
-    # Help the zero-shot model understand what "Safety" means in this app.
-    # Keeping other category labels untouched preserves existing behavior.
     if category_name.strip().lower() == "safety":
         return "Safety (accidents and hazards)"
     return category_name
 
 
+# ---------------------------------------------------------------------------
+# Reports
+# ---------------------------------------------------------------------------
+
 def create_report(db: Session, *, report_in: ReportCreate, current_user: CurrentUser) -> ReportRead:
-    """Persist a new report and return it (AI runs asynchronously in a background task)."""
     now = datetime.now(tz=timezone.utc)
 
     category_id = report_in.category_id
     if category_id is not None:
-        # Some clients send `0` as a placeholder value; treat as "unset" so
-        # report creation doesn't fail the FK constraint and AI can classify later.
         if category_id <= 0:
             logger.info("Ignoring invalid category_id=%r on report creation.", category_id)
             category_id = None
@@ -73,6 +72,7 @@ def create_report(db: Session, *, report_in: ReportCreate, current_user: Current
         user_id=current_user.id,
         category_id=category_id,
         possible_duplicate_of=possible_duplicate_of,
+        priority=report_in.priority,
     )
     db.add(report)
     db.commit()
@@ -85,6 +85,7 @@ def run_report_ai_pipeline(report_id: int) -> None:
     Background AI pipeline for a report:
     - classify description -> set category_id (if still NULL)
     - generate a confirmation message (optional persisted comment)
+    - generate Macedonian AI confirmation (FR-03)
 
     This must never raise: report creation should not fail due to AI.
     """
@@ -102,7 +103,7 @@ def run_report_ai_pipeline(report_id: int) -> None:
 
         categories = db.scalars(select(Category)).all()
         if not categories:
-            logger.warning("AI pipeline: no categories found — skipping classification for report_id=%d.", report_id)
+            logger.warning("AI pipeline: no categories found — skipping for report_id=%d.", report_id)
             categories_sorted: list[Category] = []
         else:
             categories_sorted = sorted(categories, key=lambda c: c.name.casefold())
@@ -116,7 +117,7 @@ def run_report_ai_pipeline(report_id: int) -> None:
         predicted_label: str | None = None
         category_changed = False
 
-        # Only auto-assign when the report still has no category (do not override user/admin updates).
+        # Only auto-assign when the report still has no category.
         if report.category_id is None and candidate_labels:
             try:
                 predicted_label = classify_text(
@@ -125,115 +126,80 @@ def run_report_ai_pipeline(report_id: int) -> None:
                     min_confidence=settings.ai_min_confidence,
                 )
             except Exception:
-                logger.warning("AI unavailable — skipping classification for report_id=%d.", report_id, exc_info=True)
+                logger.warning("AI unavailable — skipping for report_id=%d.", report_id, exc_info=True)
                 predicted_label = None
 
         if report.category_id is None and predicted_label:
             predicted_key = _normalize_category_key(predicted_label)
-            new_category_id = category_name_key_to_id.get(predicted_key) or classifier_label_key_to_id.get(predicted_key)
+            new_category_id = (
+                category_name_key_to_id.get(predicted_key)
+                or classifier_label_key_to_id.get(predicted_key)
+            )
             if new_category_id is not None:
                 report.category_id = new_category_id
                 category_changed = True
                 logger.info(
                     "Auto-assigned category_id=%d ('%s') for report_id=%d",
-                    new_category_id,
-                    predicted_label,
-                    report_id,
+                    new_category_id, predicted_label, report_id,
                 )
             else:
-                logger.warning("AI classification label not matched to DB category: %s", predicted_label)
+                logger.warning("AI label not matched to DB category: %s", predicted_label)
 
         if report.category_id is None and settings.ai_default_category_name:
-            fallback_id = category_name_key_to_id.get(_normalize_category_key(settings.ai_default_category_name))
+            fallback_id = category_name_key_to_id.get(
+                _normalize_category_key(settings.ai_default_category_name)
+            )
             if fallback_id is not None:
                 report.category_id = fallback_id
                 category_changed = True
                 logger.info(
                     "Applied fallback category_id=%d ('%s') for report_id=%d",
-                    fallback_id,
-                    settings.ai_default_category_name,
-                    report_id,
+                    fallback_id, settings.ai_default_category_name, report_id,
                 )
             else:
                 logger.warning(
-                    "Fallback category '%s' not found in DB — category_id left NULL for report_id=%d.",
-                    settings.ai_default_category_name,
-                    report_id,
+                    "Fallback category '%s' not found in DB — left NULL for report_id=%d.",
+                    settings.ai_default_category_name, report_id,
                 )
 
         if category_changed:
             db.commit()
 
+        # Resolve category name for messages (after classification is settled)
         category_label_for_message: str | None = None
         if report.category_id is not None:
             category_label_for_message = next(
-                (c.name for c in categories_sorted if c.id == report.category_id),
-                None,
+                (c.name for c in categories_sorted if c.id == report.category_id), None
             )
 
-            # --- existing confirmation message (English comment, kept as-is) ---
-            category_label_for_message: str | None = None
-            if report.category_id is not None:
-                category_label_for_message = next(
-                    (c.name for c in categories_sorted if c.id == report.category_id),
-                    None,
-                )
+        # --- English confirmation (existing) ---
+        message = generate_confirmation_message(
+            report.description,
+            category_label=category_label_for_message,
+            possible_duplicate_of=report.possible_duplicate_of,
+        )
 
-            message = generate_confirmation_message(
+        # AI-generated Macedonian confirmation (with priority)
+
+        try:
+            mk_text = generate_confirmation_mk(
                 report.description,
                 category_label=category_label_for_message,
+                priority=report.priority,                      # ← CR-02
                 possible_duplicate_of=report.possible_duplicate_of,
             )
+            report.ai_confirmation_text = mk_text
+            db.commit()
+            logger.info("ai_confirmation_text saved for report_id=%d", report_id)
+        except Exception:
+            logger.warning(
+                "Unexpected error saving ai_confirmation_text for report_id=%d — skipping.",
+                report_id,
+                exc_info=True,
+            )
+        # ------------------------------------------------------------------ #
 
-            # ------------------------------------------------------------------ #
-            # FR-03: AI-generated Macedonian confirmation                         #
-            # Runs here (still in background thread) — never blocks API response  #
-            # ------------------------------------------------------------------ #
-            try:
-                mk_text = generate_confirmation_mk(
-                    report.description,
-                    category_label=category_label_for_message,
-                    possible_duplicate_of=report.possible_duplicate_of,
-                )
-                report.ai_confirmation_text = mk_text
-                db.commit()
-                logger.info(
-                    "FR-03: ai_confirmation_text saved for report_id=%d", report_id
-                )
-            except Exception:
-                # generate_confirmation_mk already catches internally;
-                # this outer guard is an extra safety net.
-                logger.warning(
-                    "FR-03: Unexpected error saving ai_confirmation_text for report_id=%d — skipping.",
-                    report_id,
-                    exc_info=True,
-                )
-            # ------------------------------------------------------------------ #
-
-            if message and settings.ai_confirmation_comment_user_id is not None:
-                existing = db.scalars(
-                    select(Comment)
-                    .where(Comment.report_id == report.id)
-                    .where(Comment.user_id == settings.ai_confirmation_comment_user_id)
-                ).first()
-                if existing is None:
-                    db.add(
-                        Comment(
-                            report_id=report.id,
-                            user_id=settings.ai_confirmation_comment_user_id,
-                            content=message,
-                        )
-                    )
-                    try:
-                        db.commit()
-                    except Exception:
-                        db.rollback()
-                        logger.warning(
-                            "AI confirmation persistence failed — skipping comment for report_id=%d.",
-                            report_id,
-                            exc_info=True,
-                        )
-
+        # --- Persist EN confirmation as a comment (optional) ---
         if message and settings.ai_confirmation_comment_user_id is not None:
             existing = db.scalars(
                 select(Comment)
@@ -241,39 +207,31 @@ def run_report_ai_pipeline(report_id: int) -> None:
                 .where(Comment.user_id == settings.ai_confirmation_comment_user_id)
             ).first()
             if existing is None:
-                db.add(
-                    Comment(
-                        report_id=report.id,
-                        user_id=settings.ai_confirmation_comment_user_id,
-                        content=message,
-                    )
-                )
+                db.add(Comment(
+                    report_id=report.id,
+                    user_id=settings.ai_confirmation_comment_user_id,
+                    content=message,
+                ))
                 try:
                     db.commit()
                 except Exception:
                     db.rollback()
                     logger.warning(
-                        "AI confirmation persistence failed — skipping comment for report_id=%d.",
-                        report_id,
-                        exc_info=True,
+                        "AI confirmation persistence failed for report_id=%d.", report_id, exc_info=True
                     )
 
-        elapsed_ms_total = (perf_counter() - total_start) * 1000
-        logger.info("AI pipeline latency: %.0fms", elapsed_ms_total)
+        elapsed_ms = (perf_counter() - total_start) * 1000
+        logger.info("AI pipeline latency: %.0fms", elapsed_ms)
     except Exception:
         logger.warning("AI pipeline failed for report_id=%d — skipping.", report_id, exc_info=True)
     finally:
         db.close()
 
-
 def list_reports(db: Session, *, current_user: CurrentUser) -> list[ReportRead]:
-    """Return reports filtered by role: citizens see only their own."""
     stmt = select(Report)
     if current_user.role == UserRole.citizen:
         stmt = stmt.where(Report.user_id == current_user.id)
-
-    reports = db.scalars(stmt).all()
-    return [ReportRead.model_validate(r) for r in reports]
+    return [ReportRead.model_validate(r) for r in db.scalars(stmt).all()]
 
 
 def _get_or_404(db: Session, report_id: int) -> Report:
@@ -289,7 +247,6 @@ def _record_status_history(
     new_status_id: int | None,
     changed_by_user_id: UUID,
 ) -> None:
-    """Insert a History row capturing the old and new status of a report."""
     db.add(History(
         report_id=report.id,
         old_status_id=report.status_id,
@@ -299,7 +256,6 @@ def _record_status_history(
 
 
 def get_report(db: Session, *, report_id: int, current_user: CurrentUser) -> ReportRead:
-    """Return a single report. Citizens can only fetch their own."""
     report = _get_or_404(db, report_id)
     if current_user.role == UserRole.citizen and report.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not allowed")
@@ -309,7 +265,6 @@ def get_report(db: Session, *, report_id: int, current_user: CurrentUser) -> Rep
 def update_report(
     db: Session, *, report_id: int, report_in: ReportUpdate, current_user: CurrentUser
 ) -> ReportRead:
-    """Update a report. Citizens can only update their own; officers/admins can update any."""
     report = _get_or_404(db, report_id)
     if current_user.role == UserRole.citizen and report.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not allowed")
@@ -335,12 +290,9 @@ def update_report(
 def update_status(
     db: Session, *, report_id: int, status_in: StatusUpdate, current_user: CurrentUser
 ) -> ReportRead:
-    """Change a report's status. Officers and admins only. Always logs history."""
     report = _get_or_404(db, report_id)
-
     if status_in.status_id != report.status_id:
         _record_status_history(db, report, status_in.status_id, current_user.id)
-
     report.status_id = status_in.status_id
     db.commit()
     db.refresh(report)
@@ -348,32 +300,99 @@ def update_status(
 
 
 def delete_report(db: Session, *, report_id: int, current_user: CurrentUser) -> None:
-    """Delete a report. Citizens can only delete their own; admins can delete any."""
     report = _get_or_404(db, report_id)
     is_owner = report.user_id == current_user.id
-    allowed = current_user.role == UserRole.admin or (current_user.role == UserRole.citizen and is_owner)
+    allowed = current_user.role == UserRole.admin or (
+        current_user.role == UserRole.citizen and is_owner
+    )
     if not allowed:
         raise HTTPException(status_code=403, detail="Not allowed")
-
     db.delete(report)
     db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Comments
+# ---------------------------------------------------------------------------
+
+def list_comments(
+    db: Session, *, report_id: int, current_user: CurrentUser
+) -> list[CommentRead]:
+    report = _get_or_404(db, report_id)
+    if current_user.role == UserRole.citizen and report.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    comments = db.scalars(
+        select(Comment)
+        .where(Comment.report_id == report_id)
+        .order_by(Comment.created_at.asc())
+    ).all()
+    return [CommentRead.model_validate(c) for c in comments]
 
 
 def create_comment(
     db: Session, *, report_id: int, comment_in: CommentCreate, current_user: CurrentUser
 ) -> CommentRead:
-    """Add a comment to a report. Officers and admins only (per UI requirement)."""
-    # Verification of roles is handled at router level, but we check here too for safety.
     if current_user.role not in [UserRole.officer, UserRole.admin]:
         raise HTTPException(status_code=403, detail="Only officers and admins can comment")
 
     report = _get_or_404(db, report_id)
+
     comment = Comment(
         report_id=report.id,
         user_id=current_user.id,
         content=comment_in.content,
     )
     db.add(comment)
+
+    from app.services.notification_service import create_comment_notification
+    create_comment_notification(db, report=report, commenter_user_id=current_user.id)
+
     db.commit()
     db.refresh(comment)
     return CommentRead.model_validate(comment)
+
+
+# ---------------------------------------------------------------------------
+# Attachments
+# ---------------------------------------------------------------------------
+
+def list_attachments(
+    db: Session, *, report_id: int, current_user: CurrentUser
+) -> list[AttachmentRead]:
+    report = _get_or_404(db, report_id)
+    if current_user.role == UserRole.citizen and report.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    attachments = db.scalars(
+        select(Attachment)
+        .where(Attachment.report_id == report_id)
+        .order_by(Attachment.created_at.asc())
+    ).all()
+    return [AttachmentRead.model_validate(a) for a in attachments]
+
+
+def create_attachment(
+    db: Session,
+    *,
+    report_id: int,
+    file_url: str,
+    original_filename: str,
+    content_type: str,
+    file_size_bytes: int,
+    current_user: CurrentUser,
+) -> AttachmentRead:
+    if current_user.role not in [UserRole.officer, UserRole.admin]:
+        raise HTTPException(status_code=403, detail="Only officers and admins can upload attachments")
+
+    report = _get_or_404(db, report_id)
+
+    attachment = Attachment(
+        report_id=report.id,
+        file_url=file_url,
+        original_filename=original_filename,
+        content_type=content_type,
+        file_size_bytes=file_size_bytes,
+    )
+    db.add(attachment)
+    db.commit()
+    db.refresh(attachment)
+    return AttachmentRead.model_validate(attachment)

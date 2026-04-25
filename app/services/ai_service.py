@@ -16,6 +16,7 @@ import logging
 import re
 import threading
 from time import monotonic, perf_counter
+from typing import Literal
 
 from transformers import pipeline
 
@@ -318,6 +319,169 @@ def classify_text(
     elapsed_ms = (perf_counter() - start) * 1000
     logger.info("AI classification latency: %.0fms", elapsed_ms)
     return label
+
+
+PriorityLevel = Literal["Низок", "Среден", "Висок", "Итен"]
+
+_HIGH_URGENCY_KEYWORDS = {
+    "пожар",
+    "оган",
+    "гори",
+    "се шири пожар",
+    "критично",
+    "ризик по живот",
+    "повреда",
+    "итна интервенција",
+    "fire",
+    "explosion",
+    "urgent",
+    "emergency",
+    "critical",
+    "life-threatening",
+    "danger",
+    "immediate risk",
+    "поплава",
+    "flood",
+    "експлозија",
+    "итно",
+    "опасно",
+    "загрозено",
+}
+_MEDIUM_URGENCY_KEYWORDS = {
+    "опасност",
+    "hazard",
+    "струја",
+    "ризик",
+    "кабел",
+    "оштетено",
+    "може да падне",
+    "небезбедно",
+    "протекување",
+    "лизгаво",
+    "нестабилно",
+    "risk",
+    "unsafe",
+    "damaged",
+    "unstable",
+    "leaking",
+    "exposed wire",
+    "dangerous",
+}
+_MILD_ISSUE_KEYWORDS = {
+    "оштетен",
+    "расипан",
+    "не работи",
+    "дефект",
+    "дупка",
+    "проблем",
+    "валкано",
+    "блокирано",
+    "broken",
+    "not working",
+    "defect",
+    "blocked",
+    "dirty",
+    "damaged",
+    "оштетено",
+    "незначителен проблем",
+}
+_LOW_ISSUE_KEYWORDS = {
+    "мал проблем",
+    "незначително",
+    "козметички",
+    "благо оштетување",
+    "minor",
+    "small issue",
+    "cosmetic",
+    "slight damage",
+}
+_PRIORITY_ORDER: tuple[PriorityLevel, ...] = ("Низок", "Среден", "Висок", "Итен")
+
+
+def _normalize_priority_text(text: str) -> str:
+    """Normalize free-form text for fast keyword and similarity checks."""
+    return re.sub(r"\s+", " ", text).strip().casefold()
+
+
+def _contains_keyword(text: str, keywords: set[str]) -> bool:
+    """Return True when any keyword appears as a substring in normalized text."""
+    if not text:
+        return False
+    return any(keyword in text for keyword in keywords)
+
+
+def _tokenize_priority_text(text: str) -> set[str]:
+    """Tokenize normalized text into simple alphanumeric words."""
+    return set(re.findall(r"\w+", text, flags=re.UNICODE))
+
+
+def _base_priority_from_text(normalized_text: str) -> PriorityLevel:
+    """Compute the initial priority from direct keyword evidence in text."""
+    if _contains_keyword(normalized_text, _HIGH_URGENCY_KEYWORDS):
+        return "Итен"
+    if _contains_keyword(normalized_text, _MEDIUM_URGENCY_KEYWORDS):
+        return "Висок"
+    if _contains_keyword(normalized_text, _LOW_ISSUE_KEYWORDS):
+        return "Низок"
+    if _contains_keyword(normalized_text, _MILD_ISSUE_KEYWORDS):
+        return "Среден"
+    return "Низок"
+
+
+def _history_should_boost(text: str, history: list[str]) -> bool:
+    """Check whether similar historical reports suggest increasing one priority level."""
+    normalized_text = _normalize_priority_text(text)
+    if not normalized_text:
+        return False
+
+    base_tokens = _tokenize_priority_text(normalized_text)
+    if not base_tokens:
+        return False
+
+    risk_keywords = _HIGH_URGENCY_KEYWORDS | _MEDIUM_URGENCY_KEYWORDS
+    for entry in history:
+        normalized_entry = _normalize_priority_text(entry)
+        if not normalized_entry:
+            continue
+        if not _contains_keyword(normalized_entry, risk_keywords):
+            continue
+
+        if normalized_text in normalized_entry or normalized_entry in normalized_text:
+            return True
+
+        overlap = len(base_tokens & _tokenize_priority_text(normalized_entry))
+        if overlap >= 2:
+            return True
+
+    return False
+
+
+def _boost_priority_once(priority: PriorityLevel) -> PriorityLevel:
+    """Increase priority by one level, capped at the highest level."""
+    try:
+        index = _PRIORITY_ORDER.index(priority)
+    except ValueError:
+        return priority
+    if index >= len(_PRIORITY_ORDER) - 1:
+        return priority
+    return _PRIORITY_ORDER[index + 1]
+
+
+def assign_priority(text: str, history: list[str]) -> PriorityLevel:
+    """Assign report priority using keyword scoring and lightweight historical boost.
+
+    Rules:
+    - High-urgency keywords -> Итен
+    - Medium-urgency keywords -> Висок
+    - Mild issue words -> Среден
+    - Otherwise -> Низок
+    - If similar historical reports contain risk keywords, boost by one level
+    """
+    normalized_text = _normalize_priority_text(text)
+    priority = _base_priority_from_text(normalized_text)
+    if _history_should_boost(text, history):
+        priority = _boost_priority_once(priority)
+    return priority
 
 
 def generate_confirmation_message(

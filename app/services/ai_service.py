@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 _classifier_lock = threading.Lock()
 _classifier = None
+_CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 
 _classification_cache_lock = threading.Lock()
 _classification_cache: dict[tuple[str, tuple[str, ...], float | None], "_ClassificationCacheEntry"] = {}
@@ -175,6 +176,40 @@ def _classify_text_openai(text: str, candidate_labels: list[str]) -> str | None:
         return None
 
 
+def _should_try_openai_classification(
+    *,
+    text: str,
+    top_label: str | None,
+    top_score: float | None,
+    min_confidence: float | None,
+) -> bool:
+    """
+    Decide when the local zero-shot result is weak enough to ask OpenAI instead.
+
+    The local BART zero-shot model is English-centric, so Macedonian/Cyrillic
+    reports often need a stronger fallback path even when the call "succeeds".
+    """
+    settings = get_settings()
+    if not settings.ai_openai_fallback_enabled or not settings.openai_api_key:
+        return False
+
+    if top_label is None:
+        return True
+
+    effective_threshold = min_confidence
+    has_cyrillic = _CYRILLIC_RE.search(text) is not None
+    if has_cyrillic and (effective_threshold is None or effective_threshold <= 0.0):
+        effective_threshold = 0.55
+
+    if effective_threshold is not None and top_score is not None and top_score < effective_threshold:
+        return True
+
+    if has_cyrillic and top_label.strip().casefold() == "other":
+        return True
+
+    return False
+
+
 def classify_text(
     text: str,
     candidate_labels: list[str],
@@ -217,12 +252,13 @@ def classify_text(
             return cached
 
     top_label = None
+    top_score: float | None = None
     try:
         classifier = _get_classifier()
         result = classifier(text, candidate_labels)
         # result = {"labels": ["Roads", "Waste", ...], "scores": [0.91, 0.05, ...], ...}
         top_label = result["labels"][0]
-        top_score: float = result["scores"][0]
+        top_score = float(result["scores"][0])
         logger.info("Classified text as '%s' (confidence %.2f)", top_label, top_score)
         if min_confidence is not None and top_score < min_confidence:
             logger.info(
@@ -236,6 +272,26 @@ def classify_text(
             "AI unavailable — skipping HuggingFace classification (trying OpenAI fallback).",
             exc_info=True,
         )
+        top_label = None
+
+    if _should_try_openai_classification(
+        text=text,
+        top_label=top_label,
+        top_score=top_score,
+        min_confidence=min_confidence,
+    ):
+        label = _classify_text_openai(text, candidate_labels)
+        if isinstance(label, str) and label:
+            if ttl_seconds > 0 and not cache_hit:
+                _classification_cache_set(
+                    key=cache_key,
+                    label=label,
+                    ttl_seconds=ttl_seconds,
+                    now_monotonic=monotonic(),
+                )
+            elapsed_ms = (perf_counter() - start) * 1000
+            logger.info("AI classification latency: %.0fms (OpenAI fallback)", elapsed_ms)
+            return label
         top_label = None
 
     if top_label is not None:
@@ -439,6 +495,51 @@ def _build_mk_prompt(
     return f"<s>[INST] {instruction} [/INST]"
 
 
+def _generate_confirmation_mk_openai(
+    description: str,
+    *,
+    category_label: str | None,
+    priority: str | None,
+    possible_duplicate_of: int | None,
+) -> str | None:
+    """Use OpenAI as a secondary fallback for Macedonian confirmation text."""
+    settings = get_settings()
+    if not settings.ai_openai_fallback_enabled or not settings.openai_api_key:
+        return None
+
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=settings.openai_api_key, timeout=settings.ai_openai_timeout_seconds)
+        priority_mk = _priority_to_mk(priority)
+        user_bits = [f"Опис на пријавата:\n{description.strip()}"]
+        if category_label:
+            user_bits.append(f"Категорија: {category_label}")
+        if priority_mk or priority:
+            user_bits.append(f"Приоритет: {priority_mk or priority}")
+        if possible_duplicate_of is not None:
+            user_bits.append(f"Можен дупликат на пријава бр.: {possible_duplicate_of}")
+
+        response = client.responses.create(
+            model=settings.ai_openai_model,
+            input=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Напиши кратка потврдна порака на македонски јазик за градска пријава. "
+                        "Биди јасен, конкретен и љубезен. Не поставувај прашања."
+                    ),
+                },
+                {"role": "user", "content": "\n".join(user_bits)},
+            ],
+        )
+        message = (response.output_text or "").strip()
+        return message or None
+    except Exception:
+        logger.exception("FR-03: OpenAI fallback for Macedonian confirmation failed.")
+        return None
+
+
 def generate_confirmation_mk(
     description: str,
     *,
@@ -461,6 +562,16 @@ def generate_confirmation_mk(
     if not settings.ai_enabled:
         logger.info("FR-03: AI disabled — using MK fallback template.")
         return _mk_fallback(category_label, priority, possible_duplicate_of)
+
+    openai_message = _generate_confirmation_mk_openai(
+        description,
+        category_label=category_label,
+        priority=priority,
+        possible_duplicate_of=possible_duplicate_of,
+    )
+    if openai_message:
+        logger.info("FR-03: MK confirmation generated via OpenAI fallback.")
+        return openai_message
 
     prompt = _build_mk_prompt(description, category_label, priority, possible_duplicate_of)
 

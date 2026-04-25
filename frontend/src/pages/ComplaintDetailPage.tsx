@@ -21,6 +21,8 @@ export default function ComplaintDetailPage() {
     queryKey: ["reports", id],
     queryFn: () => fetchReportById(Number(id)),
     enabled: !!id,
+    refetchInterval: (query) => (query.state.data?.category_id == null ? 2000 : false),
+    refetchIntervalInBackground: true,
   });
 
   if (isLoading) {

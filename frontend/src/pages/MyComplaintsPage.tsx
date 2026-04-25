@@ -11,7 +11,7 @@ import { Search, Plus, MapPin, Calendar } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { fetchReports } from "@/services/reports";
 import { useLookups } from "@/hooks/useLookups";
-import { deriveTitle, formatDate, formatCoords, getStatusStyle } from "@/lib/reportHelpers";
+import { deriveTitle, formatDate, formatCoords, getPriorityLabel, getPriorityStyle, getStatusStyle } from "@/lib/reportHelpers";
 
 export default function MyComplaintsPage() {
   const navigate = useNavigate();
@@ -111,7 +111,12 @@ export default function MyComplaintsPage() {
                     )}
                     <div className="flex items-center justify-between">
                       <span className="flex items-center gap-1 text-xs text-muted-foreground"><Calendar className="h-3 w-3" />{formatDate(r.created_at)}</span>
-                      <Badge variant="secondary" className="text-xs">{categoryLabel(r.category_id)}</Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className={`text-xs ${getPriorityStyle(r.priority)}`}>
+                          {getPriorityLabel(r.priority)}
+                        </Badge>
+                        <Badge variant="secondary" className="text-xs">{categoryLabel(r.category_id)}</Badge>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>

@@ -18,6 +18,7 @@ export interface CommentRead {
 export interface ReportRead {
   id: number;
   description: string;
+  priority: string | null;
   latitude: number | null;
   longitude: number | null;
   category_id: number | null;
@@ -35,6 +36,8 @@ export interface ReportCreate {
   longitude: number | null;
   category_id?: number | null;
 }
+
+export type PriorityValue = "Низок" | "Среден" | "Висок" | "Итен";
 
 export function fetchReports(): Promise<ReportRead[]> {
   return apiFetch<ReportRead[]>("/reports");
@@ -55,5 +58,12 @@ export function addComment(reportId: number, content: string): Promise<CommentRe
   return apiFetch<CommentRead>(`/reports/${reportId}/comments`, {
     method: "POST",
     body: JSON.stringify({ content }),
+  });
+}
+
+export function updateReportPriority(reportId: number, priority: PriorityValue): Promise<ReportRead> {
+  return apiFetch<ReportRead>(`/reports/${reportId}/priority`, {
+    method: "PATCH",
+    body: JSON.stringify({ priority }),
   });
 }

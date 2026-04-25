@@ -7,7 +7,7 @@ from uuid import UUID
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sqlalchemy import func, select
+from sqlalchemy import func, inspect, select, text
 
 from app.db.base import Base
 from app.db.session import engine, SessionLocal
@@ -103,6 +103,7 @@ STATUSES = [
 def seed() -> None:
     print("Creating tables...")
     Base.metadata.create_all(engine)
+    _sync_dev_schema()
 
     with SessionLocal() as db:
 
@@ -161,6 +162,22 @@ def seed() -> None:
             print("Reports already seeded.")
 
     print("Done seeding!")
+
+
+def _sync_dev_schema() -> None:
+    """
+    Apply lightweight schema repairs for local development databases.
+
+    SQLAlchemy `create_all()` creates missing tables, but it does not alter
+    existing tables when columns are added later in the codebase.
+    """
+    inspector = inspect(engine)
+    report_columns = {column["name"] for column in inspector.get_columns("reports")}
+
+    if "ai_confirmation_text" not in report_columns:
+        print("Adding missing column reports.ai_confirmation_text...")
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE reports ADD COLUMN ai_confirmation_text TEXT"))
 
 
 # ---------------------------------------------------------------------------

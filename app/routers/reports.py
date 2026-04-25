@@ -3,7 +3,15 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.attachment import AttachmentRead
-from app.schemas.report import CommentCreate, CommentRead, ReportCreate, ReportRead, ReportUpdate, StatusUpdate
+from app.schemas.report import (
+    CommentCreate,
+    CommentRead,
+    PriorityUpdate,
+    ReportCreate,
+    ReportRead,
+    ReportUpdate,
+    StatusUpdate,
+)
 from app.schemas.user import CurrentUser, UserRole
 from app.services import report_service
 from app.utils.dependencies import get_current_user, require_roles
@@ -68,6 +76,22 @@ def update_report_status(
 ) -> ReportRead:
     """Change a report's status. Officers and admins only. Always logs history."""
     return report_service.update_status(db, report_id=report_id, status_in=status_in, current_user=current_user)
+
+
+@router.patch("/{report_id}/priority", response_model=ReportRead)
+def update_report_priority(
+    report_id: int,
+    priority_in: PriorityUpdate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin)),
+) -> ReportRead:
+    """Change a report's priority. Officers and admins only."""
+    return report_service.update_priority(
+        db,
+        report_id=report_id,
+        priority_in=priority_in,
+        current_user=current_user,
+    )
 
 
 @router.delete("/{report_id}", status_code=204)

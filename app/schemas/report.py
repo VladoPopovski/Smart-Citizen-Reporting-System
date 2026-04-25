@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -20,7 +21,6 @@ class ReportCreate(ReportBase):
     but the user can optionally suggest one.
     """
     category_id: int | None = None
-    priority: str | None = None
 
 
 class ReportUpdate(BaseModel):
@@ -33,6 +33,13 @@ class ReportUpdate(BaseModel):
 
 class StatusUpdate(BaseModel):
     status_id: int
+
+
+PriorityValue = Literal["Низок", "Среден", "Висок", "Итен"]
+
+
+class PriorityUpdate(BaseModel):
+    priority: PriorityValue
 
 
 class CommentCreate(BaseModel):

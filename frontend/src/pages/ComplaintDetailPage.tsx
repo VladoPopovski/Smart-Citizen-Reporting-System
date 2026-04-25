@@ -1,21 +1,30 @@
 import { useParams, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ChevronLeft, MapPin, Calendar, Tag, History, AlertTriangle } from "lucide-react";
-import { fetchReportById } from "@/services/reports";
+import { fetchReportById, updateReportPriority, type PriorityValue } from "@/services/reports";
 import { useLookups } from "@/hooks/useLookups";
 import { deriveTitle, formatDate, formatCoords, getPriorityLabel, getPriorityStyle, getStatusStyle } from "@/lib/reportHelpers";
 import { StatusTimeline } from "@/components/StatusTimeline";
 import { CommentsSection } from "@/components/CommentsSection";
+import { useRole } from "@/context/RoleContext";
+import { useToast } from "@/hooks/use-toast";
+
+const PRIORITY_OPTIONS: PriorityValue[] = ["Низок", "Среден", "Висок", "Итен"];
 
 export default function ComplaintDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { categoryLabel, statusLabel } = useLookups();
+  const { role } = useRole();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const canEditPriority = role === "officer" || role === "admin";
 
   const { data: report, isLoading, error } = useQuery({
     queryKey: ["reports", id],
@@ -23,6 +32,27 @@ export default function ComplaintDetailPage() {
     enabled: !!id,
     refetchInterval: (query) => (query.state.data?.category_id == null ? 2000 : false),
     refetchIntervalInBackground: true,
+  });
+
+  const priorityMutation = useMutation({
+    mutationFn: (priority: PriorityValue) => {
+      if (!report?.id) {
+        throw new Error("Report is not loaded yet.");
+      }
+      return updateReportPriority(report.id, priority);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reports", id] });
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      toast({ title: "Успешно", description: "Приоритетот е ажуриран." });
+    },
+    onError: (err: Error) => {
+      toast({
+        title: "Грешка",
+        description: err.message ?? "Неуспешно ажурирање на приоритет.",
+        variant: "destructive",
+      });
+    },
   });
 
   if (isLoading) {
@@ -103,6 +133,29 @@ export default function ComplaintDetailPage() {
                     {getPriorityLabel(report.priority)}
                   </Badge>
                 </div>
+                {canEditPriority && (
+                  <div className="space-y-2 rounded-md border p-3 bg-muted/20">
+                    <p className="text-sm font-medium">Промени приоритет</p>
+                    <Select
+                      value={report.priority ?? undefined}
+                      onValueChange={(value) => {
+                        const nextPriority = value as PriorityValue;
+                        if (nextPriority === report.priority) return;
+                        priorityMutation.mutate(nextPriority);
+                      }}
+                      disabled={priorityMutation.isPending}
+                    >
+                      <SelectTrigger className="max-w-[220px]">
+                        <SelectValue placeholder="Избери приоритет" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PRIORITY_OPTIONS.map((option) => (
+                          <SelectItem key={option} value={option}>{option}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

@@ -541,5 +541,36 @@ def test_25_citizen_list_sees_only_own_reports(client: TestClient):
         app.dependency_overrides[get_current_user] = lambda: DEV_USER
 
 
+def test_26_officer_can_patch_priority(client: TestClient):
+    created = _create(client, {"description": "E2E: priority patch by officer."})
+    report_id = created["id"]
+
+    app.dependency_overrides[get_current_user] = lambda: OFFICER_USER
+    try:
+        resp = client.patch(
+            f"{PREFIX}/{report_id}/priority",
+            json={"priority": "Итен"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["priority"] == "Итен"
+    finally:
+        app.dependency_overrides[get_current_user] = lambda: DEV_USER
+
+
+def test_27_citizen_cannot_patch_priority(client: TestClient):
+    created = _create(client, {"description": "E2E: citizen cannot patch priority."})
+    report_id = created["id"]
+
+    app.dependency_overrides[get_current_user] = lambda: CITIZEN_USER
+    try:
+        resp = client.patch(
+            f"{PREFIX}/{report_id}/priority",
+            json={"priority": "Висок"},
+        )
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides[get_current_user] = lambda: DEV_USER
+
+
 if __name__ == "__main__":
     run_all_tests()

@@ -17,7 +17,15 @@ from app.models.history import History
 from app.models.report import Report
 from app.models.comment import Comment
 from app.schemas.attachment import AttachmentRead
-from app.schemas.report import CommentCreate, CommentRead, ReportCreate, ReportRead, ReportUpdate, StatusUpdate
+from app.schemas.report import (
+    CommentCreate,
+    CommentRead,
+    PriorityUpdate,
+    ReportCreate,
+    ReportRead,
+    ReportUpdate,
+    StatusUpdate,
+)
 from app.schemas.user import CurrentUser, UserRole
 from app.services.ai_service import assign_priority, classify_text, generate_confirmation_message, generate_confirmation_mk
 from app.utils.duplicate_detection import check_duplicate
@@ -72,7 +80,6 @@ def create_report(db: Session, *, report_in: ReportCreate, current_user: Current
         user_id=current_user.id,
         category_id=category_id,
         possible_duplicate_of=possible_duplicate_of,
-        priority=report_in.priority,
     )
     db.add(report)
     db.commit()
@@ -165,23 +172,24 @@ def run_report_ai_pipeline(report_id: int) -> None:
         if category_changed:
             db.commit()
 
-        try:
-            recent_descriptions = db.scalars(
-                select(Report.description)
-                .where(Report.id != report.id)
-                .order_by(Report.created_at.desc())
-                .limit(20)
-            ).all()
-            report.priority = assign_priority(report.description, list(recent_descriptions))
-            db.commit()
-            logger.info("Auto-assigned priority='%s' for report_id=%d", report.priority, report_id)
-        except Exception:
-            db.rollback()
-            logger.warning(
-                "Priority assignment failed for report_id=%d — continuing pipeline.",
-                report_id,
-                exc_info=True,
-            )
+        if not (report.priority or "").strip():
+            try:
+                recent_descriptions = db.scalars(
+                    select(Report.description)
+                    .where(Report.id != report.id)
+                    .order_by(Report.created_at.desc())
+                    .limit(20)
+                ).all()
+                report.priority = assign_priority(report.description, list(recent_descriptions))
+                db.commit()
+                logger.info("Auto-assigned priority='%s' for report_id=%d", report.priority, report_id)
+            except Exception:
+                db.rollback()
+                logger.warning(
+                    "Priority assignment failed for report_id=%d — continuing pipeline.",
+                    report_id,
+                    exc_info=True,
+                )
 
         # Resolve category name for messages (after classification is settled)
         category_label_for_message: str | None = None
@@ -312,6 +320,20 @@ def update_status(
     if status_in.status_id != report.status_id:
         _record_status_history(db, report, status_in.status_id, current_user.id)
     report.status_id = status_in.status_id
+    db.commit()
+    db.refresh(report)
+    return ReportRead.model_validate(report)
+
+
+def update_priority(
+    db: Session,
+    *,
+    report_id: int,
+    priority_in: PriorityUpdate,
+    current_user: CurrentUser,
+) -> ReportRead:
+    report = _get_or_404(db, report_id)
+    report.priority = priority_in.priority
     db.commit()
     db.refresh(report)
     return ReportRead.model_validate(report)

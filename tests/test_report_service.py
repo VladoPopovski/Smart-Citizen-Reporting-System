@@ -49,6 +49,12 @@ def _report_in(**fields) -> MagicMock:
     return m
 
 
+def _priority_in(priority: str) -> MagicMock:
+    m = MagicMock()
+    m.priority = priority
+    return m
+
+
 class TestGetReport:
     def test_citizen_gets_own_report(self):
         user = _make_user(UserRole.citizen)
@@ -280,3 +286,64 @@ class TestListReports:
 
         results = report_service.list_reports(db, current_user=admin)
         assert len(results) == 2
+
+
+class TestUpdatePriority:
+    def test_officer_can_update_priority(self):
+        officer = _make_user(UserRole.officer)
+        report = _make_report(user_id=uuid4())
+        report.priority = None
+        db = _db(report)
+
+        result = report_service.update_priority(
+            db,
+            report_id=1,
+            priority_in=_priority_in("Висок"),
+            current_user=officer,
+        )
+
+        assert report.priority == "Висок"
+        assert result.priority == "Висок"
+        db.commit.assert_called_once()
+        db.refresh.assert_called_once_with(report)
+
+
+class TestRunReportAiPipelinePriority:
+    def test_pipeline_does_not_overwrite_existing_priority(self, monkeypatch):
+        report = MagicMock()
+        report.id = 1
+        report.description = "Оштетен пат"
+        report.category_id = 1
+        report.priority = "Итен"
+        report.possible_duplicate_of = None
+
+        fake_db = MagicMock()
+        fake_db.get.return_value = report
+        fake_db.scalars.return_value.all.return_value = []
+
+        monkeypatch.setattr(report_service, "SessionLocal", lambda: fake_db)
+        monkeypatch.setattr(
+            report_service,
+            "get_settings",
+            lambda: MagicMock(
+                ai_enabled=True,
+                ai_min_confidence=0.5,
+                ai_default_category_name=None,
+                ai_confirmation_comment_user_id=None,
+            ),
+        )
+        monkeypatch.setattr(report_service, "generate_confirmation_message", lambda *args, **kwargs: None)
+        monkeypatch.setattr(report_service, "generate_confirmation_mk", lambda *args, **kwargs: "mk")
+
+        called = {"assign": False}
+
+        def _assign_priority(_text, _history):
+            called["assign"] = True
+            return "Низок"
+
+        monkeypatch.setattr(report_service, "assign_priority", _assign_priority)
+
+        report_service.run_report_ai_pipeline(1)
+
+        assert called["assign"] is False
+        assert report.priority == "Итен"

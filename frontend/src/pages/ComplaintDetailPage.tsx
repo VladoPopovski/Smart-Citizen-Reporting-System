@@ -5,10 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ChevronLeft, MapPin, Calendar, Tag, History } from "lucide-react";
+import { ChevronLeft, MapPin, Calendar, Tag, History, AlertTriangle } from "lucide-react";
 import { fetchReportById } from "@/services/reports";
 import { useLookups } from "@/hooks/useLookups";
-import { deriveTitle, formatDate, formatCoords, getStatusStyle } from "@/lib/reportHelpers";
+import { deriveTitle, formatDate, formatCoords, getPriorityLabel, getPriorityStyle, getStatusStyle } from "@/lib/reportHelpers";
 import { StatusTimeline } from "@/components/StatusTimeline";
 import { CommentsSection } from "@/components/CommentsSection";
 
@@ -95,6 +95,13 @@ export default function ComplaintDetailPage() {
                   <Tag className="h-4 w-4 text-muted-foreground" />
                   <span className="text-sm font-medium">Категорија:</span>
                   <Badge variant="secondary">{categoryLabel(report.category_id)}</Badge>
+                </div>
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">Приоритет:</span>
+                  <Badge variant="outline" className={getPriorityStyle(report.priority)}>
+                    {getPriorityLabel(report.priority)}
+                  </Badge>
                 </div>
               </CardContent>
             </Card>

@@ -30,3 +30,34 @@ export function formatDate(iso: string): string {
 export function formatCoords(lat: number, lng: number): string {
   return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 }
+
+function normalizePriority(priority: string | null | undefined): string {
+  if (!priority) return "";
+  return priority.trim().toLowerCase();
+}
+
+export function getPriorityLabel(priority: string | null | undefined): string {
+  const normalized = normalizePriority(priority);
+  if (normalized === "итен" || normalized === "urgent" || normalized === "critical") return "Итен";
+  if (normalized === "висок" || normalized === "high") return "Висок";
+  if (normalized === "среден" || normalized === "medium" || normalized === "normal") return "Среден";
+  if (normalized === "низок" || normalized === "low") return "Низок";
+  return "Непознат";
+}
+
+export function getPriorityStyle(priority: string | null | undefined): string {
+  const normalized = normalizePriority(priority);
+  if (normalized === "итен" || normalized === "urgent" || normalized === "critical") {
+    return "bg-destructive/10 text-destructive border-destructive/20";
+  }
+  if (normalized === "висок" || normalized === "high") {
+    return "bg-warning/10 text-warning border-warning/20";
+  }
+  if (normalized === "среден" || normalized === "medium" || normalized === "normal") {
+    return "bg-info/10 text-info border-info/20";
+  }
+  if (normalized === "низок" || normalized === "low") {
+    return "bg-success/10 text-success border-success/20";
+  }
+  return "bg-muted text-muted-foreground";
+}

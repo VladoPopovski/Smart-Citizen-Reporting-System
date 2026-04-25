@@ -6,7 +6,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { fetchReports, type ReportRead } from "@/services/reports";
 import { useLookups } from "@/hooks/useLookups";
-import { deriveTitle, formatDate, getStatusStyle } from "@/lib/reportHelpers";
+import { deriveTitle, formatDate, getPriorityLabel, getPriorityStyle, getStatusStyle } from "@/lib/reportHelpers";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -116,6 +116,11 @@ export default function PublicMapPage() {
                       </Badge>
                     </div>
                     <p className="text-xs text-muted-foreground line-clamp-2">{r.description}</p>
+                    <div className="flex items-center justify-start">
+                      <Badge variant="outline" className={`${getPriorityStyle(r.priority)} text-[10px] px-1.5 py-0 h-4`}>
+                        {getPriorityLabel(r.priority)}
+                      </Badge>
+                    </div>
                     <div className="flex justify-between items-center pt-1">
                       <span className="text-[10px] text-muted-foreground">{formatDate(r.created_at)}</span>
                       <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => navigate(`/complaints/${r.id}`)}>

@@ -18,6 +18,7 @@ export interface CommentRead {
 export interface ReportRead {
   id: number;
   description: string;
+  priority: string | null;
   latitude: number | null;
   longitude: number | null;
   category_id: number | null;

@@ -1,39 +1,52 @@
 import { AppLayout } from "@/components/AppLayout";
-import { complaints } from "@/data/mockData";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, MoreHorizontal } from "lucide-react";
+import { Search, Eye } from "lucide-react";
 import { useState } from "react";
+import { fetchReports, updateReportPriority, type PriorityValue } from "@/services/reports";
+import { useLookups } from "@/hooks/useLookups";
+import { deriveTitle, formatDate, getPriorityLabel, getPriorityStyle, getStatusStyle } from "@/lib/reportHelpers";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
 
-const statusStyles: Record<string, string> = {
-  new: "bg-info/10 text-info",
-  in_progress: "bg-warning/10 text-warning",
-  resolved: "bg-success/10 text-success",
-  rejected: "bg-destructive/10 text-destructive",
-  pending: "bg-muted text-muted-foreground",
-};
-
-const statusLabels: Record<string, string> = {
-  new: "Нова",
-  in_progress: "Во тек",
-  pending: "Во чекање",
-  resolved: "Решено",
-  rejected: "Одбиено",
-};
-
-const priorityLabels: Record<string, string> = {
-  high: "Високо",
-  medium: "Средно",
-  low: "Ниско",
-};
+const PRIORITY_OPTIONS: PriorityValue[] = ["Низок", "Среден", "Висок", "Итен"];
 
 export default function ManageComplaintsPage() {
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { categoryLabel, statusLabel } = useLookups();
   const [search, setSearch] = useState("");
 
-  const filtered = complaints.filter((c) =>
-    c.title.toLowerCase().includes(search.toLowerCase()) || c.citizen.toLowerCase().includes(search.toLowerCase())
+  const { data: reports = [], isLoading } = useQuery({
+    queryKey: ["reports"],
+    queryFn: fetchReports,
+  });
+
+  const priorityMutation = useMutation({
+    mutationFn: ({ reportId, priority }: { reportId: number; priority: PriorityValue }) =>
+      updateReportPriority(reportId, priority),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      toast({ title: "Успешно", description: "Приоритетот е ажуриран." });
+    },
+    onError: (err: Error) => {
+      toast({
+        title: "Грешка",
+        description: err.message ?? "Неуспешно ажурирање на приоритет.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const filtered = reports.filter((r) =>
+    r.description.toLowerCase().includes(search.toLowerCase()) ||
+    String(r.id).includes(search.trim()) ||
+    (r.priority ?? "").toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -70,31 +83,57 @@ export default function ManageComplaintsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((c) => (
-                    <tr key={c.id} className="border-b last:border-0 hover:bg-secondary/50 transition-colors">
-                      <td className="py-3 px-2 font-mono text-muted-foreground">{c.id}</td>
-                      <td className="py-3 px-2 font-medium text-foreground">{c.title}</td>
-                      <td className="py-3 px-2 text-muted-foreground">{c.citizen}</td>
-                      <td className="py-3 px-2 text-muted-foreground">{c.category}</td>
+                  {filtered.map((r) => (
+                    <tr key={r.id} className="border-b last:border-0 hover:bg-secondary/50 transition-colors">
+                      <td className="py-3 px-2 font-mono text-muted-foreground">#{r.id}</td>
+                      <td className="py-3 px-2 font-medium text-foreground">{deriveTitle(r.description)}</td>
+                      <td className="py-3 px-2 text-muted-foreground">{r.user_id.slice(0, 8)}...</td>
+                      <td className="py-3 px-2 text-muted-foreground">{categoryLabel(r.category_id)}</td>
                       <td className="py-3 px-2">
-                        <Badge variant="outline" className={statusStyles[c.status]}>
-                          {statusLabels[c.status]}
+                        <Badge variant="outline" className={getStatusStyle(r.status_id)}>
+                          {statusLabel(r.status_id)}
                         </Badge>
                       </td>
                       <td className="py-3 px-2">
-                        <span className={`text-xs font-medium ${
-                          c.priority === "high" ? "text-destructive" :
-                          c.priority === "medium" ? "text-warning" : "text-success"
-                        }`}>
-                          {priorityLabels[c.priority]}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className={getPriorityStyle(r.priority)}>
+                            {getPriorityLabel(r.priority)}
+                          </Badge>
+                          <Select
+                            value={r.priority ?? undefined}
+                            onValueChange={(value) => {
+                              const nextPriority = value as PriorityValue;
+                              if (nextPriority === r.priority) return;
+                              priorityMutation.mutate({ reportId: r.id, priority: nextPriority });
+                            }}
+                            disabled={priorityMutation.isPending}
+                          >
+                            <SelectTrigger className="h-8 w-[120px] text-xs">
+                              <SelectValue placeholder="Промени" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {PRIORITY_OPTIONS.map((option) => (
+                                <SelectItem key={option} value={option}>{option}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </td>
-                      <td className="py-3 px-2 text-muted-foreground">{c.date}</td>
+                      <td className="py-3 px-2 text-muted-foreground">{formatDate(r.created_at)}</td>
                       <td className="py-3 px-2">
-                        <Button variant="ghost" size="sm"><MoreHorizontal className="h-4 w-4" /></Button>
+                        <Button variant="ghost" size="sm" onClick={() => navigate(`/complaints/${r.id}`)}>
+                          <Eye className="h-4 w-4" />
+                        </Button>
                       </td>
                     </tr>
                   ))}
+                  {!isLoading && filtered.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="py-8 text-center text-muted-foreground">
+                        Нема пријави за прикажување.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

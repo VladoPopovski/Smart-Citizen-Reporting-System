@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -32,6 +33,13 @@ class ReportUpdate(BaseModel):
 
 class StatusUpdate(BaseModel):
     status_id: int
+
+
+PriorityValue = Literal["Низок", "Среден", "Висок", "Итен"]
+
+
+class PriorityUpdate(BaseModel):
+    priority: PriorityValue
 
 
 class CommentCreate(BaseModel):
@@ -74,5 +82,6 @@ class ReportRead(ReportBase):
     created_at: datetime
     updated_at: datetime
     possible_duplicate_of: int | None = None
+    ai_confirmation_text: str | None = None
     history_entries: list[HistoryRead] = []
     comments: list[CommentRead] = []

@@ -14,18 +14,46 @@ interface LoginPageProps {
 
 export default function LoginPage({ mode = "login" }: LoginPageProps) {
   const navigate = useNavigate();
-  const { login } = useRole();
+  const { login, register } = useRole();
   const [activeTab, setActiveTab] = useState<"login" | "register">(mode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<UserRole | "">("");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!role) return;
-    console.log(`${activeTab} submitted:`, { email, password, role });
-    login(role as UserRole);
-    navigate(role === "citizen" ? "/" : "/dashboard");
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    if (activeTab === "register" && !role) {
+      setErrorMessage("Изберете улога за новата сметка.");
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+
+      if (activeTab === "login") {
+        await login(email, password);
+        navigate("/");
+      } else {
+        const result = await register(email, password, role as UserRole);
+
+        if (result.emailConfirmationRequired) {
+          setSuccessMessage("Проверете ја вашата е-пошта за потврда, па потоа најавете се.");
+          setActiveTab("login");
+        } else {
+          navigate("/");
+        }
+      }
+    } catch (error: any) {
+      setErrorMessage(error?.message ?? "Настана грешка. Обидете се повторно.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const roleLabels: Record<UserRole, string> = {
@@ -112,21 +140,35 @@ export default function LoginPage({ mode = "login" }: LoginPageProps) {
                 )}
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="role">Улога *</Label>
-                <Select value={role} onValueChange={(val) => setRole(val as UserRole)}>
-                  <SelectTrigger id="role">
-                    <SelectValue placeholder="Изберете улога" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(Object.keys(roleLabels) as UserRole[]).map((r) => (
-                      <SelectItem key={r} value={r}>{roleLabels[r]}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {activeTab === "register" && (
+                <div className="space-y-2">
+                  <Label htmlFor="role">Улога *</Label>
+                  <Select value={role} onValueChange={(val) => setRole(val as UserRole)}>
+                    <SelectTrigger id="role">
+                      <SelectValue placeholder="Изберете улога" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(roleLabels) as UserRole[]).map((r) => (
+                        <SelectItem key={r} value={r}>{roleLabels[r]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
-              <Button type="submit" className="w-full" disabled={!role}>
+              {errorMessage && (
+                <p className="text-sm text-destructive">{errorMessage}</p>
+              )}
+
+              {successMessage && (
+                <p className="text-sm text-emerald-600">{successMessage}</p>
+              )}
+
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={isSubmitting || (activeTab === "register" && !role)}
+              >
                 {activeTab === "login" ? "Најави се" : "Регистрирај се"}
               </Button>
             </form>

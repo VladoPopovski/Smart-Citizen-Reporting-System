@@ -1,4 +1,7 @@
-import { createContext, useContext, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
+import type { Session } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
+import { apiFetch } from "@/services/api";
 
 export type UserRole = "citizen" | "officer" | "admin";
 
@@ -7,8 +10,10 @@ interface RoleContextType {
   setRole: (role: UserRole) => void;
   userName: string;
   isLoggedIn: boolean;
-  login: (role: UserRole) => void;
-  logout: () => void;
+  isAuthLoading: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  register: (email: string, password: string, role: UserRole) => Promise<{ emailConfirmationRequired: boolean }>;
+  logout: () => Promise<void>;
 }
 
 const RoleContext = createContext<RoleContextType | undefined>(undefined);
@@ -16,24 +21,117 @@ const RoleContext = createContext<RoleContextType | undefined>(undefined);
 export function RoleProvider({ children }: { children: ReactNode }) {
   const [role, setRole] = useState<UserRole>("citizen");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [userName, setUserName] = useState("Корисник");
 
-  const userName =
-    role === "citizen" ? "Марко Петров" :
-    role === "officer" ? "Ана Стојанова" :
-    "Админ Корисник";
+  const getRoleFromSession = (session: Session): UserRole => {
+    const raw =
+      session.user.app_metadata?.app_role ??
+      session.user.user_metadata?.app_role ??
+      session.user.user_metadata?.role;
 
-  const login = (selectedRole: UserRole) => {
-    setRole(selectedRole);
-    setIsLoggedIn(true);
+    if (raw === "admin" || raw === "officer" || raw === "citizen") {
+      return raw;
+    }
+
+    return "citizen";
   };
 
-  const logout = () => {
+  const displayNameFromEmail = (email?: string | null): string => {
+    if (!email) return "Корисник";
+    return email.split("@")[0] || "Корисник";
+  };
+
+  const syncSession = async (session: Session | null) => {
+    if (!session) {
+      localStorage.removeItem("auth_token");
+      setIsLoggedIn(false);
+      setRole("citizen");
+      setUserName("Корисник");
+      return;
+    }
+
+    localStorage.setItem("auth_token", session.access_token);
+    setIsLoggedIn(true);
+    setRole(getRoleFromSession(session));
+    setUserName(displayNameFromEmail(session.user.email));
+
+    try {
+      const me = await apiFetch<{ id: string; email: string | null; role: UserRole }>("/users/me");
+      setRole(me.role);
+      setUserName(displayNameFromEmail(me.email));
+    } catch {
+      // Keep session-derived role/email if backend profile sync is not yet available.
+    }
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const init = async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        if (isMounted) {
+          await syncSession(data.session);
+        }
+      } finally {
+        if (isMounted) {
+          setIsAuthLoading(false);
+        }
+      }
+    };
+
+    void init();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      void syncSession(session);
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const login = async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+  };
+
+  const register = async (email: string, password: string, selectedRole: UserRole) => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { app_role: selectedRole },
+      },
+    });
+
+    if (error) throw error;
+
+    return {
+      emailConfirmationRequired: !data.session,
+    };
+  };
+
+  const logout = async () => {
+    await supabase.auth.signOut();
+    localStorage.removeItem("auth_token");
     setIsLoggedIn(false);
     setRole("citizen");
+    setUserName("Корисник");
   };
 
+  const contextValue = useMemo(
+    () => ({ role, setRole, userName, isLoggedIn, isAuthLoading, login, register, logout }),
+    [role, userName, isLoggedIn, isAuthLoading],
+  );
+
   return (
-    <RoleContext.Provider value={{ role, setRole, userName, isLoggedIn, login, logout }}>
+    <RoleContext.Provider value={contextValue}>
       {children}
     </RoleContext.Provider>
   );

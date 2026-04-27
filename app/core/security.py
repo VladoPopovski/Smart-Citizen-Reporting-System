@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import base64
 import json
+from functools import lru_cache
 from typing import Any
 
 from fastapi import HTTPException, status
+from jwt import InvalidTokenError, PyJWKClient
+import jwt
 
 from app.core.config import get_settings
 
@@ -36,14 +39,17 @@ def decode_jwt_payload(token: str) -> dict[str, Any]:
     return payload
 
 
+@lru_cache(maxsize=8)
+def _get_jwks_client(jwks_url: str) -> PyJWKClient:
+    return PyJWKClient(jwks_url)
+
+
 def verify_supabase_token(token: str) -> dict[str, Any]:
     """
-    Placeholder Supabase JWT verification.
+    Verify a Supabase JWT.
 
-    - Accepts a JWT token issued by Supabase (expected).
-    - Currently performs *only* payload decoding and basic shape checks.
-
-    Replace this with real signature verification (JWKS) before production use.
+    - In dev mock mode, only decodes payload (no signature checks).
+    - In real mode, verifies signature with Supabase JWKS.
     """
 
     settings = get_settings()
@@ -53,19 +59,54 @@ def verify_supabase_token(token: str) -> dict[str, Any]:
             detail="Missing bearer token.",
         )
 
-    if not settings.supabase_mock_verify:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Real Supabase JWT verification is not implemented in this template.",
-        )
+    if settings.supabase_mock_verify:
+        try:
+            payload = decode_jwt_payload(token)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token.",
+            )
+    else:
+        if not settings.supabase_url:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="SUPABASE_URL is not configured.",
+            )
 
-    try:
-        payload = decode_jwt_payload(token)
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token.",
-        )
+        base_url = settings.supabase_url.rstrip("/")
+        jwks_url = f"{base_url}/auth/v1/.well-known/jwks.json"
+        issuer = f"{base_url}/auth/v1"
+
+        try:
+            jwks_client = _get_jwks_client(jwks_url)
+            signing_key = jwks_client.get_signing_key_from_jwt(token)
+
+            options = {"require": ["sub", "exp", "iat"]}
+            decode_kwargs: dict[str, Any] = {
+                "jwt": token,
+                "key": signing_key.key,
+                "algorithms": ["RS256", "ES256"],
+                "issuer": issuer,
+                "options": options,
+            }
+
+            if settings.supabase_jwt_audience:
+                decode_kwargs["audience"] = settings.supabase_jwt_audience
+            else:
+                options["verify_aud"] = False
+
+            payload = jwt.decode(**decode_kwargs)
+        except InvalidTokenError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token signature or claims.",
+            )
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Unable to verify token.",
+            )
 
     # Minimal checks that the payload looks like an auth token.
     if "sub" not in payload:

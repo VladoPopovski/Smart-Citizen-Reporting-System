@@ -1,23 +1,59 @@
 import { AppLayout } from "@/components/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FileText, Clock, CheckCircle, AlertTriangle } from "lucide-react";
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { fetchReports } from "@/services/reports";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { fetchReports, updateReportStatus, updateReportCategory } from "@/services/reports";
 import { useLookups } from "@/hooks/useLookups";
 import { formatDate, deriveTitle, getPriorityLabel } from "@/lib/reportHelpers";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
 
 const OPEN_STATUS_NAMES = ["submitted", "in progress", "pending"];
 const RESOLVED_STATUS_NAMES = ["resolved", "closed"];
 
 export default function DashboardPage() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { data: reports = [], isLoading, error } = useQuery({
     queryKey: ["reports"],
     queryFn: fetchReports,
   });
-  const { statusLabel, categoryLabel } = useLookups();
+  const { statusLabel, categoryLabel, statuses, categories } = useLookups();
+
+  const statusMutation = useMutation({
+    mutationFn: ({ reportId, status_id }: { reportId: string; status_id: number }) =>
+      updateReportStatus(reportId, status_id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      toast({ title: "Успешно", description: "Статусот е ажуриран." });
+    },
+    onError: (err: Error) => {
+      toast({
+        title: "Грешка",
+        description: err.message ?? "Неуспешно ажурирање на статус.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const categoryMutation = useMutation({
+    mutationFn: ({ reportId, category_id }: { reportId: string; category_id: number }) =>
+      updateReportCategory(reportId, category_id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      toast({ title: "Успешно", description: "Категоријата е ажурирана." });
+    },
+    onError: (err: Error) => {
+      toast({
+        title: "Грешка",
+        description: err.message ?? "Неуспешно ажурирање на категорија.",
+        variant: "destructive",
+      });
+    },
+  });
 
   const stats = useMemo(() => {
     const now = new Date();
@@ -111,17 +147,58 @@ export default function DashboardPage() {
                     </tr>
                   )}
                   {!isLoading && recentReports.map((report) => (
-                    <tr key={report.id} className="border-b last:border-0 hover:bg-secondary/50 transition-colors">
+                    <tr
+                      key={report.id}
+                      className="border-b last:border-0 hover:bg-secondary/50 transition-colors"
+                    >
                       <td className="py-3 px-2 font-mono text-muted-foreground">#{report.id}</td>
                       <td className="py-3 px-2">
                         <div className="font-medium text-foreground">{deriveTitle(report.description, 64)}</div>
                         <div className="text-xs text-muted-foreground">корисник {report.user_id.slice(0, 8)}</div>
                       </td>
-                      <td className="py-3 px-2 text-muted-foreground">{categoryLabel(report.category_id)}</td>
                       <td className="py-3 px-2">
-                        <Badge variant="outline" className="bg-secondary/60 text-foreground">
-                          {statusLabel(report.status_id)}
-                        </Badge>
+                        <Select
+                          value={report.category_id?.toString() ?? undefined}
+                          onValueChange={(value) => {
+                            const newCategoryId = Number(value);
+                            if (newCategoryId === report.category_id) return;
+                            categoryMutation.mutate({ reportId: report.id, category_id: newCategoryId });
+                          }}
+                          disabled={categoryMutation.isPending}
+                        >
+                          <SelectTrigger className="w-[140px] text-xs">
+                            <SelectValue placeholder="Избери категорија" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {categories.map((cat) => (
+                              <SelectItem key={cat.id} value={cat.id.toString()}>
+                                {cat.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="py-3 px-2">
+                        <Select
+                          value={report.status_id?.toString() ?? undefined}
+                          onValueChange={(value) => {
+                            const newStatusId = Number(value);
+                            if (newStatusId === report.status_id) return;
+                            statusMutation.mutate({ reportId: report.id, status_id: newStatusId });
+                          }}
+                          disabled={statusMutation.isPending}
+                        >
+                          <SelectTrigger className="w-[140px] text-xs">
+                            <SelectValue placeholder="Избери статус" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {statuses.map((s) => (
+                              <SelectItem key={s.id} value={s.id.toString()}>
+                                {s.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </td>
                       <td className="py-3 px-2 text-muted-foreground">{formatDate(report.created_at)}</td>
                       <td className="py-3 px-2">

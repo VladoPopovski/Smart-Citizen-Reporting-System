@@ -48,6 +48,14 @@ interface AnalyzeReportResponse {
   ai_confirmation_text: string | null;
 }
 
+interface DuplicateCandidate {
+  id: string;
+  description: string;
+  latitude: number | null;
+  longitude: number | null;
+  created_at: string;
+}
+
 function fallbackCategoryId(description: string): number {
   const text = description.toLowerCase();
   if (["fire", "smoke", "injur", "accident", "danger", "unsafe", "emergency", "explosion", "flood", "hazard"].some((k) => text.includes(k))) {
@@ -71,6 +79,86 @@ function fallbackPriority(description: string): PriorityValue {
     return "Висок";
   }
   return "Среден";
+}
+
+function normalizeDuplicateText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenizeDuplicateText(text: string): string[] {
+  return normalizeDuplicateText(text)
+    .split(" ")
+    .filter((token) => token.length > 2);
+}
+
+function duplicateTextScore(a: string, b: string): number {
+  const tokensA = new Set(tokenizeDuplicateText(a));
+  const tokensB = new Set(tokenizeDuplicateText(b));
+  if (tokensA.size === 0 || tokensB.size === 0) return 0;
+
+  let overlap = 0;
+  for (const token of tokensA) {
+    if (tokensB.has(token)) overlap += 1;
+  }
+
+  return (2 * overlap) / (tokensA.size + tokensB.size);
+}
+
+function duplicateDistanceMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+): number {
+  const toRad = (value: number) => (value * Math.PI) / 180;
+  const earthRadius = 6_371_000;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+async function findPossibleDuplicateReportId(data: ReportCreate): Promise<string | null> {
+  const { data: candidates, error } = await supabase
+    .from("reports")
+    .select("id, description, latitude, longitude, created_at")
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  if (error) {
+    return null;
+  }
+
+  const createdAtMs = Date.now();
+  let bestMatch: { id: string; score: number } | null = null;
+
+  for (const candidate of (candidates ?? []) as DuplicateCandidate[]) {
+    const candidateMs = new Date(candidate.created_at).getTime();
+    if (Number.isNaN(candidateMs)) continue;
+
+    const timeDiffHours = Math.abs(createdAtMs - candidateMs) / (1000 * 60 * 60);
+    if (timeDiffHours > 24) continue;
+
+    const textScore = duplicateTextScore(data.description, candidate.description);
+    if (textScore < 0.75) continue;
+
+    if (data.latitude != null && data.longitude != null && candidate.latitude != null && candidate.longitude != null) {
+      const distance = duplicateDistanceMeters(data.latitude, data.longitude, candidate.latitude, candidate.longitude);
+      if (distance > 100) continue;
+    }
+
+    if (!bestMatch || textScore > bestMatch.score) {
+      bestMatch = { id: candidate.id, score: textScore };
+    }
+  }
+
+  return bestMatch?.id ?? null;
 }
 
 function normalizeReport(row: any): ReportRead {
@@ -158,6 +246,8 @@ export async function createReport(data: ReportCreate): Promise<ReportRead> {
     };
   }
 
+  const possibleDuplicateOf = await findPossibleDuplicateReportId(data);
+
   const payload = {
     description: data.description,
     latitude: data.latitude,
@@ -166,6 +256,7 @@ export async function createReport(data: ReportCreate): Promise<ReportRead> {
     status_id: data.status_id ?? null,
     priority: analysis?.priority ?? null,
     ai_confirmation_text: analysis?.ai_confirmation_text ?? null,
+    possible_duplicate_of: possibleDuplicateOf,
     user_id: userId,
   };
 
@@ -198,22 +289,29 @@ export async function addComment(reportId: string, content: string): Promise<Com
 }
 
 export async function updateReport(reportId: string, patch: Partial<Pick<ReportRead, "description" | "latitude" | "longitude" | "category_id" | "status_id" | "priority">>): Promise<ReportRead> {
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from("reports")
     .update(patch)
-    .eq("id", reportId)
-    .select("*")
-    .single();
+    .eq("id", reportId);
 
   if (error) {
     throw new Error(error.message || "Failed to update report.");
   }
 
-  return normalizeReport(data);
+  // Fetch the updated report to return fresh data
+  return fetchReportById(reportId);
 }
 
 export function updateReportPriority(reportId: string, priority: PriorityValue): Promise<ReportRead> {
   return updateReport(reportId, { priority });
+}
+
+export function updateReportStatus(reportId: string, status_id: number): Promise<ReportRead> {
+  return updateReport(reportId, { status_id });
+}
+
+export function updateReportCategory(reportId: string, category_id: number): Promise<ReportRead> {
+  return updateReport(reportId, { category_id });
 }
 
 export async function fetchReportComments(reportId: string): Promise<CommentRead[]> {

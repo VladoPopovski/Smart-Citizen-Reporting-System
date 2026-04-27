@@ -27,7 +27,7 @@ export default function AssignedComplaintsPage() {
   });
 
   const priorityMutation = useMutation({
-    mutationFn: ({ reportId, priority }: { reportId: number; priority: PriorityValue }) =>
+    mutationFn: ({ reportId, priority }: { reportId: string; priority: PriorityValue }) =>
       updateReportPriority(reportId, priority),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["reports"] });

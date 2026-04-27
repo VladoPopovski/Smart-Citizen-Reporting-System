@@ -5,13 +5,15 @@ import { apiFetch } from "@/services/api";
 
 export type UserRole = "citizen" | "officer" | "admin";
 
+const ROLE_OVERRIDE_STORAGE_KEY = "selected_login_role";
+
 interface RoleContextType {
   role: UserRole;
   setRole: (role: UserRole) => void;
   userName: string;
   isLoggedIn: boolean;
   isAuthLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, selectedRole: UserRole) => Promise<void>;
   register: (email: string, password: string, role: UserRole) => Promise<{ emailConfirmationRequired: boolean }>;
   logout: () => Promise<void>;
 }
@@ -42,9 +44,26 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     return email.split("@")[0] || "Корисник";
   };
 
+  const getStoredRoleOverride = (): UserRole | null => {
+    const raw = localStorage.getItem(ROLE_OVERRIDE_STORAGE_KEY);
+    if (raw === "citizen" || raw === "officer" || raw === "admin") {
+      return raw;
+    }
+    return null;
+  };
+
+  const setRoleOverride = (selectedRole: UserRole) => {
+    localStorage.setItem(ROLE_OVERRIDE_STORAGE_KEY, selectedRole);
+  };
+
+  const clearRoleOverride = () => {
+    localStorage.removeItem(ROLE_OVERRIDE_STORAGE_KEY);
+  };
+
   const syncSession = async (session: Session | null) => {
     if (!session) {
       localStorage.removeItem("auth_token");
+      clearRoleOverride();
       setIsLoggedIn(false);
       setRole("citizen");
       setUserName("Корисник");
@@ -53,12 +72,13 @@ export function RoleProvider({ children }: { children: ReactNode }) {
 
     localStorage.setItem("auth_token", session.access_token);
     setIsLoggedIn(true);
-    setRole(getRoleFromSession(session));
+    const roleOverride = getStoredRoleOverride();
+    setRole(roleOverride ?? getRoleFromSession(session));
     setUserName(displayNameFromEmail(session.user.email));
 
     try {
       const me = await apiFetch<{ id: string; email: string | null; role: UserRole }>("/users/me");
-      setRole(me.role);
+      setRole(roleOverride ?? me.role);
       setUserName(displayNameFromEmail(me.email));
     } catch {
       // Keep session-derived role/email if backend profile sync is not yet available.
@@ -96,9 +116,13 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, selectedRole: UserRole) => {
+    setRoleOverride(selectedRole);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+    if (error) {
+      clearRoleOverride();
+      throw error;
+    }
   };
 
   const register = async (email: string, password: string, selectedRole: UserRole) => {
@@ -120,6 +144,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     await supabase.auth.signOut();
     localStorage.removeItem("auth_token");
+    clearRoleOverride();
     setIsLoggedIn(false);
     setRole("citizen");
     setUserName("Корисник");

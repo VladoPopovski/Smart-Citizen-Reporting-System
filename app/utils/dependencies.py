@@ -1,7 +1,9 @@
 from __future__ import annotations
+import json
 from uuid import UUID
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.core.security import verify_supabase_token
 from app.db.session import get_db
@@ -17,7 +19,7 @@ DEV_USER = CurrentUser(
 )
 
 
-def get_current_user(
+def get_current_user_logic(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> CurrentUser:
@@ -49,6 +51,28 @@ def get_current_user(
     except Exception:
         role = UserRole.citizen
 
+    db.execute(
+        text("select set_config('request.jwt.claim.sub', :sub, true)"),
+        {"sub": str(user_id)},
+    )
+    db.execute(
+        text("select set_config('request.jwt.claim.role', :role, true)"),
+        {"role": role.value},
+    )
+    db.execute(
+        text("select set_config('request.jwt.claims', :claims, true)"),
+        {
+            "claims": json.dumps(
+                {
+                    "sub": str(user_id),
+                    "email": email,
+                    "role": role.value,
+                    "app_role": role.value,
+                }
+            )
+        },
+    )
+
     # ✅ BE2: Upsert — создај корисник во DB ако не постои
     user_service.upsert_user(db, user_id=user_id, email=email, role=role)
 
@@ -67,3 +91,13 @@ def require_roles(*allowed_roles: UserRole):
             )
         return current_user
     return _role_dependency
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> CurrentUser:
+    from app.core.config import get_settings
+    settings = get_settings()
+    if settings.dev_skip_auth:
+        return DEV_USER
+    return get_current_user_logic(credentials, db)

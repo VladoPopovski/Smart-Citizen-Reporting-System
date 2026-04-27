@@ -28,8 +28,12 @@ export default function LoginPage({ mode = "login" }: LoginPageProps) {
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    if (activeTab === "register" && !role) {
-      setErrorMessage("Изберете улога за новата сметка.");
+    if (!role) {
+      setErrorMessage(
+        activeTab === "login"
+          ? "Изберете улога за најава."
+          : "Изберете улога за новата сметка.",
+      );
       return;
     }
 
@@ -37,7 +41,7 @@ export default function LoginPage({ mode = "login" }: LoginPageProps) {
       setIsSubmitting(true);
 
       if (activeTab === "login") {
-        await login(email, password);
+        await login(email, password, role as UserRole);
         navigate("/");
       } else {
         const result = await register(email, password, role as UserRole);
@@ -140,21 +144,25 @@ export default function LoginPage({ mode = "login" }: LoginPageProps) {
                 )}
               </div>
 
-              {activeTab === "register" && (
-                <div className="space-y-2">
-                  <Label htmlFor="role">Улога *</Label>
-                  <Select value={role} onValueChange={(val) => setRole(val as UserRole)}>
-                    <SelectTrigger id="role">
-                      <SelectValue placeholder="Изберете улога" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(Object.keys(roleLabels) as UserRole[]).map((r) => (
-                        <SelectItem key={r} value={r}>{roleLabels[r]}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+              <div className="space-y-2">
+                <Label htmlFor="role">Улога *</Label>
+                <Select value={role} onValueChange={(val) => setRole(val as UserRole)}>
+                  <SelectTrigger id="role">
+                    <SelectValue
+                      placeholder={
+                        activeTab === "login"
+                          ? "Изберете улога за најава"
+                          : "Изберете улога"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(roleLabels) as UserRole[]).map((r) => (
+                      <SelectItem key={r} value={r}>{roleLabels[r]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
               {errorMessage && (
                 <p className="text-sm text-destructive">{errorMessage}</p>
@@ -167,7 +175,7 @@ export default function LoginPage({ mode = "login" }: LoginPageProps) {
               <Button
                 type="submit"
                 className="w-full"
-                disabled={isSubmitting || (activeTab === "register" && !role)}
+                disabled={isSubmitting || !role}
               >
                 {activeTab === "login" ? "Најави се" : "Регистрирај се"}
               </Button>

@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { getStatusStyle } from "@/lib/reportHelpers";
 
 export interface HistoryEntry {
-  id: number;
+  id: string | number;
   status_id: number;
   created_at: string;
 }

@@ -28,7 +28,7 @@ export default function ComplaintDetailPage() {
 
   const { data: report, isLoading, error } = useQuery({
     queryKey: ["reports", id],
-    queryFn: () => fetchReportById(Number(id)),
+    queryFn: () => fetchReportById(id as string),
     enabled: !!id,
     refetchInterval: (query) => (query.state.data?.category_id == null ? 2000 : false),
     refetchIntervalInBackground: true,

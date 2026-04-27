@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,7 +8,7 @@ import { Loader2, MessageSquare } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface Props {
-  reportId: number;
+  reportId: string;
   comments: CommentRead[];
 }
 

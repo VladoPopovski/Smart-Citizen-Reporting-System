@@ -6,7 +6,7 @@ from uuid import UUID
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -16,6 +16,7 @@ from app.models.category import Category
 from app.models.history import History
 from app.models.report import Report
 from app.models.comment import Comment
+from app.models.status import Status
 from app.schemas.attachment import AttachmentRead
 from app.schemas.report import (
     CommentCreate,
@@ -31,6 +32,8 @@ from app.services.ai_service import assign_priority, classify_text, generate_con
 from app.utils.duplicate_detection import check_duplicate
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_SUBMITTED_STATUS = "Submitted"
 
 
 def _normalize_category_key(value: str) -> str:
@@ -49,6 +52,10 @@ def _classifier_label_for_category(category_name: str) -> str:
 
 def create_report(db: Session, *, report_in: ReportCreate, current_user: CurrentUser) -> ReportRead:
     now = datetime.now(tz=timezone.utc)
+
+    default_status_id = db.scalar(
+        select(Status.id).where(func.lower(Status.name) == DEFAULT_SUBMITTED_STATUS.lower())
+    )
 
     category_id = report_in.category_id
     if category_id is not None:
@@ -79,12 +86,30 @@ def create_report(db: Session, *, report_in: ReportCreate, current_user: Current
         longitude=report_in.longitude,
         user_id=current_user.id,
         category_id=category_id,
+        status_id=default_status_id,
         possible_duplicate_of=possible_duplicate_of,
     )
     db.add(report)
     db.commit()
     db.refresh(report)
-    return ReportRead.model_validate(report)
+    return _to_report_read(report)
+
+
+def _to_report_read(report: Report) -> ReportRead:
+    return ReportRead(
+        id=report.id,
+        description=report.description,
+        latitude=report.latitude,
+        longitude=report.longitude,
+        priority=report.priority,
+        category_id=report.category_id,
+        status_id=report.status_id,
+        user_id=report.user_id,
+        created_at=report.created_at,
+        updated_at=report.updated_at,
+        possible_duplicate_of=report.possible_duplicate_of,
+        ai_confirmation_text=report.ai_confirmation_text,
+    )
 
 
 def run_report_ai_pipeline(report_id: int) -> None:
@@ -254,10 +279,19 @@ def run_report_ai_pipeline(report_id: int) -> None:
         db.close()
 
 def list_reports(db: Session, *, current_user: CurrentUser) -> list[ReportRead]:
-    stmt = select(Report)
-    if current_user.role == UserRole.citizen:
-        stmt = stmt.where(Report.user_id == current_user.id)
-    return [ReportRead.model_validate(r) for r in db.scalars(stmt).all()]
+    try:
+        stmt = select(Report)
+        if current_user.role == UserRole.citizen:
+            stmt = stmt.where(Report.user_id == current_user.id)
+        return [_to_report_read(r) for r in db.scalars(stmt).all()]
+    except Exception as exc:
+        logger.warning(
+            "list_reports failed for user_id=%s role=%s; returning empty list: %s",
+            current_user.id,
+            current_user.role,
+            exc,
+        )
+        return []
 
 
 def _get_or_404(db: Session, report_id: int) -> Report:
@@ -285,7 +319,7 @@ def get_report(db: Session, *, report_id: int, current_user: CurrentUser) -> Rep
     report = _get_or_404(db, report_id)
     if current_user.role == UserRole.citizen and report.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not allowed")
-    return ReportRead.model_validate(report)
+    return _to_report_read(report)
 
 
 def update_report(
@@ -310,7 +344,7 @@ def update_report(
 
     db.commit()
     db.refresh(report)
-    return ReportRead.model_validate(report)
+    return _to_report_read(report)
 
 
 def update_status(
@@ -322,7 +356,7 @@ def update_status(
     report.status_id = status_in.status_id
     db.commit()
     db.refresh(report)
-    return ReportRead.model_validate(report)
+    return _to_report_read(report)
 
 
 def update_priority(
@@ -336,7 +370,7 @@ def update_priority(
     report.priority = priority_in.priority
     db.commit()
     db.refresh(report)
-    return ReportRead.model_validate(report)
+    return _to_report_read(report)
 
 
 def delete_report(db: Session, *, report_id: int, current_user: CurrentUser) -> None:

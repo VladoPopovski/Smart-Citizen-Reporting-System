@@ -13,3 +13,4 @@ openai>=1.0.0
 rapidfuzz>=3.0
 requests>=2.31.0
 PyJWT[crypto]>=2.8.0
+psycopg[binary]

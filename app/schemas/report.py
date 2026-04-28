@@ -78,3 +78,10 @@ class ReportRead(ReportBase):
     ai_confirmation_text: str | None = None
     history_entries: list[HistoryRead] = []
     comments: list[CommentRead] = []
+
+
+class ReportExportParams(BaseModel):
+    status: str | None = Field(default=None, description="Filter by status name")
+    category: str | None = Field(default=None, description="Filter by category name")
+    date_from: datetime | None = Field(default=None, description="Filter reports created on or after this date")
+    date_to: datetime | None = Field(default=None, description="Filter reports created on or before this date")

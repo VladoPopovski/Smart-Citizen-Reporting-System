@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
@@ -15,6 +15,7 @@ from app.models.attachment import Attachment
 from app.models.category import Category
 from app.models.history import History
 from app.models.report import Report
+from app.models.status import Status
 from app.models.comment import Comment
 from app.schemas.attachment import AttachmentRead
 from app.schemas.report import CommentCreate, CommentRead, ReportCreate, ReportRead, ReportUpdate, StatusUpdate
@@ -291,9 +292,18 @@ def update_status(
     db: Session, *, report_id: int, status_in: StatusUpdate, current_user: CurrentUser
 ) -> ReportRead:
     report = _get_or_404(db, report_id)
-    if status_in.status_id != report.status_id:
+    status_changed = status_in.status_id != report.status_id
+    if status_changed:
         _record_status_history(db, report, status_in.status_id, current_user.id)
     report.status_id = status_in.status_id
+
+    # CR-06: when a report is closed, invite the citizen to rate it.
+    if status_changed:
+        new_status = db.get(Status, status_in.status_id)
+        if new_status is not None and new_status.name == "Closed":
+            from app.services.notification_service import create_rating_invitation_notification
+            create_rating_invitation_notification(db, report=report)
+
     db.commit()
     db.refresh(report)
     return ReportRead.model_validate(report)
@@ -396,3 +406,48 @@ def create_attachment(
     db.commit()
     db.refresh(attachment)
     return AttachmentRead.model_validate(attachment)
+
+
+# ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
+
+def export_reports(
+    db: Session,
+    *,
+    status: str | None = None,
+    category: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> list[Report]:
+    """Return reports filtered for export, with category/status eagerly loaded.
+
+    Filters are applied conjunctively. An unknown status/category name yields
+    no matches (rather than being silently dropped) so the caller never gets
+    back a wider set than they asked for.
+    """
+    stmt = (
+        select(Report)
+        .options(joinedload(Report.category), joinedload(Report.status))
+        .order_by(Report.created_at.desc())
+    )
+
+    if status is not None:
+        status_row = db.scalars(select(Status).where(Status.name == status)).first()
+        if status_row is None:
+            return []
+        stmt = stmt.where(Report.status_id == status_row.id)
+
+    if category is not None:
+        category_row = db.scalars(select(Category).where(Category.name == category)).first()
+        if category_row is None:
+            return []
+        stmt = stmt.where(Report.category_id == category_row.id)
+
+    if date_from is not None:
+        stmt = stmt.where(Report.created_at >= date_from)
+
+    if date_to is not None:
+        stmt = stmt.where(Report.created_at <= date_to)
+
+    return list(db.scalars(stmt).unique().all())

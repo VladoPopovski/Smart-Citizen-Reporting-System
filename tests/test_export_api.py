@@ -87,8 +87,8 @@ def _act_as(user: CurrentUser):
     app.dependency_overrides[get_current_user] = lambda: user
 
 
-def _seed_report(client: TestClient, suffix: str) -> int:
-    """Create a report owned by ADMIN (the default fixture user) so any role can see it."""
+def _seed_report(client: TestClient, suffix: str) -> str:
+    """Create a report owned by ADMIN. Returns the new UUID id as a string."""
     _act_as(ADMIN_USER)
     resp = client.post(REPORTS_PREFIX, json={"description": f"{EXPORT_DESC_PREFIX} {suffix}"})
     assert resp.status_code == 201, resp.text
@@ -136,11 +136,13 @@ class TestExportCSV:
 
         assert len(rows) >= 2  # header + ≥1 row
         header = rows[0]
-        for col in ["ID", "Title", "Description", "Category", "Status", "Created at"]:
+        # Report.title was removed in the supabase-integration merge, so the
+        # CSV no longer carries a Title column.
+        for col in ["ID", "Description", "Category", "Status", "Created at"]:
             assert col in header
 
         ids = [r[header.index("ID")] for r in rows[1:]]
-        assert str(rid) in ids
+        assert rid in ids  # rid is already a UUID string
 
     def test_unknown_status_filter_returns_empty_body(self, client: TestClient):
         _seed_report(client, "csv-unknown-status")

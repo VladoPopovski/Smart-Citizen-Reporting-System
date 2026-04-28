@@ -1,38 +1,94 @@
 import { AppLayout } from "@/components/AppLayout";
-import { dashboardStats, complaints } from "@/data/mockData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FileText, Clock, CheckCircle, AlertTriangle } from "lucide-react";
-import { useRole } from "@/context/RoleContext";
+import { useMemo } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { fetchReports, updateReportStatus, updateReportCategory } from "@/services/reports";
+import { useLookups } from "@/hooks/useLookups";
+import { formatDate, deriveTitle, getPriorityLabel } from "@/lib/reportHelpers";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
 
-const statusLabels: Record<string, string> = {
-  new: "Нова",
-  in_progress: "Во тек",
-  resolved: "Решено",
-  rejected: "Одбиено",
-};
-
-const statusStyles: Record<string, string> = {
-  new: "bg-info/10 text-info",
-  in_progress: "bg-warning/10 text-warning",
-  resolved: "bg-success/10 text-success",
-  rejected: "bg-destructive/10 text-destructive",
-};
-
-const priorityLabels: Record<string, string> = {
-  high: "Високо",
-  medium: "Средно",
-  low: "Ниско",
-};
+const OPEN_STATUS_NAMES = ["submitted", "in progress", "pending"];
+const RESOLVED_STATUS_NAMES = ["resolved", "closed"];
 
 export default function DashboardPage() {
-  const { role } = useRole();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { data: reports = [], isLoading, error } = useQuery({
+    queryKey: ["reports"],
+    queryFn: fetchReports,
+  });
+  const { statusLabel, categoryLabel, statuses, categories } = useLookups();
+
+  const statusMutation = useMutation({
+    mutationFn: ({ reportId, status_id }: { reportId: string; status_id: number }) =>
+      updateReportStatus(reportId, status_id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      toast({ title: "Успешно", description: "Статусот е ажуриран." });
+    },
+    onError: (err: Error) => {
+      toast({
+        title: "Грешка",
+        description: err.message ?? "Неуспешно ажурирање на статус.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const categoryMutation = useMutation({
+    mutationFn: ({ reportId, category_id }: { reportId: string; category_id: number }) =>
+      updateReportCategory(reportId, category_id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      toast({ title: "Успешно", description: "Категоријата е ажурирана." });
+    },
+    onError: (err: Error) => {
+      toast({
+        title: "Грешка",
+        description: err.message ?? "Неуспешно ажурирање на категорија.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const stats = useMemo(() => {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    const active = reports.filter((r) =>
+      OPEN_STATUS_NAMES.includes(statusLabel(r.status_id).toLowerCase())
+    ).length;
+
+    const resolvedThisMonth = reports.filter((r) => {
+      const reportDate = new Date(r.created_at);
+      const isResolved = RESOLVED_STATUS_NAMES.includes(statusLabel(r.status_id).toLowerCase());
+      return isResolved && reportDate.getMonth() === currentMonth && reportDate.getFullYear() === currentYear;
+    }).length;
+
+    const urgent = reports.filter((r) => getPriorityLabel(r.priority) === "Итен").length;
+
+    return {
+      total: reports.length,
+      active,
+      resolvedThisMonth,
+      urgent,
+    };
+  }, [reports, statusLabel]);
+
+  const recentReports = [...reports]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 10);
 
   const statCards = [
-    { label: "Вкупно пријави", value: dashboardStats.totalComplaints, icon: FileText, color: "text-primary" },
-    { label: "Активни (во тек)", value: dashboardStats.activeComplaints, icon: Clock, color: "text-warning" },
-    { label: "Решени (овој месец)", value: dashboardStats.resolvedThisMonth, icon: CheckCircle, color: "text-success" },
-    { label: "Итни случаи", value: dashboardStats.urgentCases, icon: AlertTriangle, color: "text-destructive" },
+    { label: "Вкупно пријави", value: stats.total, icon: FileText, color: "text-primary" },
+    { label: "Активни (во тек)", value: stats.active, icon: Clock, color: "text-warning" },
+    { label: "Решени (овој месец)", value: stats.resolvedThisMonth, icon: CheckCircle, color: "text-success" },
+    { label: "Итни случаи", value: stats.urgent, icon: AlertTriangle, color: "text-destructive" },
   ];
 
   return (
@@ -46,7 +102,15 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {statCards.map((s) => (
+          {isLoading && Array.from({ length: 4 }).map((_, idx) => (
+            <Card key={`skeleton-${idx}`}>
+              <CardContent className="py-5">
+                <Skeleton className="h-4 w-2/3 mb-2" />
+                <Skeleton className="h-8 w-1/3" />
+              </CardContent>
+            </Card>
+          ))}
+          {!isLoading && statCards.map((s) => (
             <Card key={s.label}>
               <CardContent className="py-5 flex items-center justify-between">
                 <div>
@@ -77,34 +141,83 @@ export default function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {complaints.map((c) => (
-                    <tr key={c.id} className="border-b last:border-0 hover:bg-secondary/50 transition-colors">
-                      <td className="py-3 px-2 font-mono text-muted-foreground">{c.id}</td>
+                  {isLoading && (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-muted-foreground">Се вчитуваат пријавите...</td>
+                    </tr>
+                  )}
+                  {!isLoading && recentReports.map((report) => (
+                    <tr
+                      key={report.id}
+                      className="border-b last:border-0 hover:bg-secondary/50 transition-colors"
+                    >
+                      <td className="py-3 px-2 font-mono text-muted-foreground">#{report.id}</td>
                       <td className="py-3 px-2">
-                        <div className="font-medium text-foreground">{c.title}</div>
-                        <div className="text-xs text-muted-foreground">од {c.citizen}</div>
+                        <div className="font-medium text-foreground">{deriveTitle(report.description, 64)}</div>
+                        <div className="text-xs text-muted-foreground">корисник {report.user_id.slice(0, 8)}</div>
                       </td>
-                      <td className="py-3 px-2 text-muted-foreground">{c.category}</td>
                       <td className="py-3 px-2">
-                        <Badge variant="outline" className={statusStyles[c.status]}>
-                          {statusLabels[c.status] || c.status}
-                        </Badge>
+                        <Select
+                          value={report.category_id?.toString() ?? undefined}
+                          onValueChange={(value) => {
+                            const newCategoryId = Number(value);
+                            if (newCategoryId === report.category_id) return;
+                            categoryMutation.mutate({ reportId: report.id, category_id: newCategoryId });
+                          }}
+                          disabled={categoryMutation.isPending}
+                        >
+                          <SelectTrigger className="w-[140px] text-xs">
+                            <SelectValue placeholder="Избери категорија" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {categories.map((cat) => (
+                              <SelectItem key={cat.id} value={cat.id.toString()}>
+                                {cat.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </td>
-                      <td className="py-3 px-2 text-muted-foreground">{c.date}</td>
                       <td className="py-3 px-2">
-                        <span className={`inline-flex items-center gap-1 text-xs font-medium ${
-                          c.priority === "high" ? "text-destructive" :
-                          c.priority === "medium" ? "text-warning" : "text-success"
-                        }`}>
-                          <span className={`w-2 h-2 rounded-full ${
-                            c.priority === "high" ? "bg-destructive" :
-                            c.priority === "medium" ? "bg-warning" : "bg-success"
-                          }`} />
-                          {priorityLabels[c.priority]}
+                        <Select
+                          value={report.status_id?.toString() ?? undefined}
+                          onValueChange={(value) => {
+                            const newStatusId = Number(value);
+                            if (newStatusId === report.status_id) return;
+                            statusMutation.mutate({ reportId: report.id, status_id: newStatusId });
+                          }}
+                          disabled={statusMutation.isPending}
+                        >
+                          <SelectTrigger className="w-[140px] text-xs">
+                            <SelectValue placeholder="Избери статус" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {statuses.map((s) => (
+                              <SelectItem key={s.id} value={s.id.toString()}>
+                                {s.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="py-3 px-2 text-muted-foreground">{formatDate(report.created_at)}</td>
+                      <td className="py-3 px-2">
+                        <span className="inline-flex items-center gap-1 text-xs font-medium">
+                          {getPriorityLabel(report.priority)}
                         </span>
                       </td>
                     </tr>
                   ))}
+                  {!isLoading && !error && recentReports.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-muted-foreground">Нема пријави.</td>
+                    </tr>
+                  )}
+                  {!isLoading && error && (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-destructive">Неуспешно вчитување на пријавите.</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

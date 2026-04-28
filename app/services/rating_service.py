@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import logging
 from typing import Iterable
+from uuid import UUID
 
 from fastapi import HTTPException, status as http_status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.department import Department
+from app.models.category import Category
 from app.models.rating import Rating
 from app.models.report import Report
 from app.models.status import Status
-from app.schemas.rating import DepartmentRatingAvg, RatingCreate, RatingRead
+from app.schemas.rating import CategoryRatingAvg, RatingCreate, RatingRead
 from app.schemas.user import CurrentUser, UserRole
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ def _is_status_closed(db: Session, status_id: int | None) -> bool:
     return row is not None and row.name == CLOSED_STATUS_NAME
 
 
-def _get_report_or_404(db: Session, report_id: int) -> Report:
+def _get_report_or_404(db: Session, report_id: UUID) -> Report:
     report = db.get(Report, report_id)
     if report is None:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Report not found")
@@ -37,7 +38,7 @@ def _get_report_or_404(db: Session, report_id: int) -> Report:
 def create_rating(
     db: Session,
     *,
-    report_id: int,
+    report_id: UUID,
     rating_in: RatingCreate,
     current_user: CurrentUser,
 ) -> RatingRead:
@@ -92,7 +93,7 @@ def create_rating(
 def get_rating(
     db: Session,
     *,
-    report_id: int,
+    report_id: UUID,
     current_user: CurrentUser,
 ) -> RatingRead:
     """Fetch a report's rating. Citizens can only read ratings on their own reports."""
@@ -107,25 +108,31 @@ def get_rating(
     return RatingRead.model_validate(rating)
 
 
-def average_ratings_by_department(db: Session) -> list[DepartmentRatingAvg]:
-    """Average stars and rating count per department, for departments with ≥1 rating."""
+def average_ratings_by_category(db: Session) -> list[CategoryRatingAvg]:
+    """Average stars and rating count per category, for categories with ≥1 rating.
+
+    The supabase-integration merge removed the Report→Department FK; this is
+    the closest analytics view CR-06 ("просечна оценка по оддел") can produce
+    against the current data model. Re-target at Department if the FK is
+    restored.
+    """
     stmt = (
         select(
-            Department.id.label("department_id"),
-            Department.name.label("department_name"),
+            Category.id.label("category_id"),
+            Category.name.label("category_name"),
             func.avg(Rating.stars).label("avg_stars"),
             func.count(Rating.id).label("ratings_count"),
         )
-        .join(Report, Report.department_id == Department.id)
+        .join(Report, Report.category_id == Category.id)
         .join(Rating, Rating.report_id == Report.id)
-        .group_by(Department.id, Department.name)
-        .order_by(Department.name.asc())
+        .group_by(Category.id, Category.name)
+        .order_by(Category.name.asc())
     )
     rows: Iterable = db.execute(stmt).all()
     return [
-        DepartmentRatingAvg(
-            department_id=row.department_id,
-            department_name=row.department_name,
+        CategoryRatingAvg(
+            category_id=row.category_id,
+            category_name=row.category_name,
             average_stars=round(float(row.avg_stars), 2),
             ratings_count=int(row.ratings_count),
         )

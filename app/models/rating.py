@@ -32,8 +32,11 @@ class Rating(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
-    report_id: Mapped[int] = mapped_column(
-        ForeignKey("reports.id", ondelete="CASCADE"), nullable=False, index=True,
+    report_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("reports.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     citizen_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True),

@@ -22,5 +22,20 @@ def upsert_user(
         db.add(user)
         db.commit()
         db.refresh(user)
+        return user
+
+    changed = False
+    next_email = email or user.email
+    if user.email != next_email:
+        user.email = next_email
+        changed = True
+
+    if user.role != role:
+        user.role = role
+        changed = True
+
+    if changed:
+        db.commit()
+        db.refresh(user)
 
     return user

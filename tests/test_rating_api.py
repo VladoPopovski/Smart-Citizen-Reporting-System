@@ -73,7 +73,8 @@ def cleanup_test_rows():
     db: Session = SessionLocal()
     try:
         # Find test reports first so we can delete their dependent rows.
-        report_ids = [
+        # Report.id is UUID after the supabase-integration merge.
+        report_ids: list[uuid.UUID] = [
             r.id for r in db.scalars(
                 select(Report).where(Report.description.like("E2E-RATING:%"))
             ).all()
@@ -108,14 +109,15 @@ def _act_as(user: CurrentUser):
     app.dependency_overrides[get_current_user] = lambda: user
 
 
-def _create_citizen_report(client: TestClient, description: str = "E2E-RATING: complaint") -> int:
+def _create_citizen_report(client: TestClient, description: str = "E2E-RATING: complaint") -> str:
+    """Returns the report id as a string (UUID format)."""
     _act_as(CITIZEN_USER)
     resp = client.post(REPORTS_PREFIX, json={"description": description})
     assert resp.status_code == 201, resp.text
     return resp.json()["id"]
 
 
-def _close_report(client: TestClient, report_id: int, closed_status_id: int) -> None:
+def _close_report(client: TestClient, report_id: str, closed_status_id: int) -> None:
     _act_as(OFFICER_USER)
     resp = client.patch(f"{REPORTS_PREFIX}/{report_id}/status", json={"status_id": closed_status_id})
     assert resp.status_code == 200, resp.text
@@ -255,12 +257,13 @@ class TestGetRating:
 class TestCloseStatusCreatesNotification:
     def test_closing_a_report_queues_invitation_for_owner(self, client: TestClient, closed_status_id: int):
         rid = _create_citizen_report(client)
+        rid_uuid = uuid.UUID(rid)
 
         # Snapshot existing notification rows for this report (should be 0)
         db: Session = SessionLocal()
         try:
             before = db.scalars(
-                select(Notification).where(Notification.report_id == rid)
+                select(Notification).where(Notification.report_id == rid_uuid)
             ).all()
             assert len(before) == 0
         finally:
@@ -272,7 +275,7 @@ class TestCloseStatusCreatesNotification:
         db = SessionLocal()
         try:
             after = db.scalars(
-                select(Notification).where(Notification.report_id == rid)
+                select(Notification).where(Notification.report_id == rid_uuid)
             ).all()
             assert len(after) == 1
             n = after[0]
@@ -286,6 +289,7 @@ class TestCloseStatusCreatesNotification:
         self, client: TestClient, closed_status_id: int
     ):
         rid = _create_citizen_report(client)
+        rid_uuid = uuid.UUID(rid)
 
         # Pick a non-Closed status. Use status_id=1 (Submitted) to stay portable
         # in case "In Progress" doesn't exist.
@@ -296,7 +300,7 @@ class TestCloseStatusCreatesNotification:
         db: Session = SessionLocal()
         try:
             rows = db.scalars(
-                select(Notification).where(Notification.report_id == rid)
+                select(Notification).where(Notification.report_id == rid_uuid)
             ).all()
             # No rating-invitation notification expected
             assert all("rating" not in n.message.lower() for n in rows)
@@ -315,10 +319,11 @@ class TestAnalyticsRatings:
         assert resp.status_code == 200
         body = resp.json()
         assert isinstance(body, list)
-        # Each row must follow the DepartmentRatingAvg schema
+        # Each row must follow the CategoryRatingAvg schema (post-merge: was per
+        # department before the Report→Department FK was removed).
         for row in body:
-            assert "department_id" in row
-            assert "department_name" in row
+            assert "category_id" in row
+            assert "category_name" in row
             assert "average_stars" in row
             assert "ratings_count" in row
             assert 0 <= row["average_stars"] <= 5

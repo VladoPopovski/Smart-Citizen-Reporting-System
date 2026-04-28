@@ -20,7 +20,11 @@ import NotFound from "./pages/NotFound";
 const queryClient = new QueryClient();
 
 function AppRoutes() {
-  const { role, isLoggedIn } = useRole();
+  const { role, isLoggedIn, isAuthLoading } = useRole();
+
+  if (isAuthLoading) {
+    return <div className="min-h-screen grid place-items-center text-muted-foreground">Loading...</div>;
+  }
 
   if (!isLoggedIn) {
     return (

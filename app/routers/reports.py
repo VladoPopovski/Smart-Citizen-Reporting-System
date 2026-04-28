@@ -1,5 +1,6 @@
 from datetime import datetime
 from io import BytesIO, StringIO
+from uuid import UUID
 import csv
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, UploadFile
@@ -13,15 +14,16 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.attachment import AttachmentRead
+from app.schemas.rating import RatingCreate, RatingRead
 from app.schemas.report import (
     CommentCreate,
     CommentRead,
+    PriorityUpdate,
     ReportCreate,
     ReportRead,
     ReportUpdate,
     StatusUpdate,
 )
-from app.schemas.rating import RatingCreate, RatingRead
 from app.schemas.user import CurrentUser, UserRole
 from app.services import rating_service, report_service
 from app.utils.dependencies import get_current_user, require_roles
@@ -58,7 +60,7 @@ def list_reports(
 
 @router.get("/{report_id}", response_model=ReportRead)
 def get_report(
-    report_id: int,
+    report_id: UUID,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> ReportRead:
@@ -68,7 +70,7 @@ def get_report(
 
 @router.patch("/{report_id}", response_model=ReportRead)
 def update_report(
-    report_id: int,
+    report_id: UUID,
     report_in: ReportUpdate,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
@@ -79,7 +81,7 @@ def update_report(
 
 @router.patch("/{report_id}/status", response_model=ReportRead)
 def update_report_status(
-    report_id: int,
+    report_id: UUID,
     status_in: StatusUpdate,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin)),
@@ -88,9 +90,25 @@ def update_report_status(
     return report_service.update_status(db, report_id=report_id, status_in=status_in, current_user=current_user)
 
 
+@router.patch("/{report_id}/priority", response_model=ReportRead)
+def update_report_priority(
+    report_id: UUID,
+    priority_in: PriorityUpdate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin)),
+) -> ReportRead:
+    """Change a report's priority. Officers and admins only."""
+    return report_service.update_priority(
+        db,
+        report_id=report_id,
+        priority_in=priority_in,
+        current_user=current_user,
+    )
+
+
 @router.delete("/{report_id}", status_code=204)
 def delete_report(
-    report_id: int,
+    report_id: UUID,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> None:
@@ -104,7 +122,7 @@ def delete_report(
 
 @router.get("/{report_id}/comments", response_model=list[CommentRead])
 def list_comments(
-    report_id: int,
+    report_id: UUID,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> list[CommentRead]:
@@ -114,7 +132,7 @@ def list_comments(
 
 @router.post("/{report_id}/comments", response_model=CommentRead, status_code=201)
 def create_comment(
-    report_id: int,
+    report_id: UUID,
     comment_in: CommentCreate,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin)),
@@ -129,7 +147,7 @@ def create_comment(
 
 @router.post("/{report_id}/rating", response_model=RatingRead, status_code=201)
 def create_rating(
-    report_id: int,
+    report_id: UUID,
     rating_in: RatingCreate,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.citizen)),
@@ -142,7 +160,7 @@ def create_rating(
 
 @router.get("/{report_id}/rating", response_model=RatingRead)
 def get_rating(
-    report_id: int,
+    report_id: UUID,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> RatingRead:
@@ -156,7 +174,7 @@ def get_rating(
 
 @router.get("/{report_id}/attachments", response_model=list[AttachmentRead])
 def list_attachments(
-    report_id: int,
+    report_id: UUID,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> list[AttachmentRead]:
@@ -166,7 +184,7 @@ def list_attachments(
 
 @router.post("/{report_id}/attachments", response_model=AttachmentRead, status_code=201)
 async def upload_attachment(
-    report_id: int,
+    report_id: UUID,
     file: UploadFile = File(..., description="JPG, PNG or PDF. Max 5 MB."),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin)),
@@ -189,8 +207,7 @@ async def upload_attachment(
 # ---------------------------------------------------------------------------
 
 _EXPORT_COLUMNS = [
-    ("ID",          lambda r: r.id),
-    ("Title",       lambda r: r.title or ""),
+    ("ID",          lambda r: str(r.id)),
     ("Description", lambda r: r.description),
     ("Category",    lambda r: r.category.name if r.category else ""),
     ("Status",      lambda r: r.status.name if r.status else ""),

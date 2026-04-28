@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -13,14 +14,12 @@ class ReportBase(BaseModel):
 
 
 class ReportCreate(ReportBase):
-    title: str | None = None
     """
     Schema used when creating a new report.
     Category and status are assigned later by the system,
     but the user can optionally suggest one.
     """
     category_id: int | None = None
-    priority: str | None = None
 
 
 class ReportUpdate(BaseModel):
@@ -33,6 +32,13 @@ class ReportUpdate(BaseModel):
 
 class StatusUpdate(BaseModel):
     status_id: int
+
+
+PriorityValue = Literal["Низок", "Среден", "Висок", "Итен"]
+
+
+class PriorityUpdate(BaseModel):
+    priority: PriorityValue
 
 
 class CommentCreate(BaseModel):
@@ -65,16 +71,14 @@ class HistoryRead(BaseModel):
 class ReportRead(ReportBase):
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
-    title: str | None = None
+    id: UUID
     priority: str | None = None
     category_id: int | None = None
     status_id: int | None = None
-    department_id: int | None = None
     user_id: UUID
     created_at: datetime
     updated_at: datetime
-    possible_duplicate_of: int | None = None
+    possible_duplicate_of: UUID | None = None
     ai_confirmation_text: str | None = None
     history_entries: list[HistoryRead] = []
     comments: list[CommentRead] = []

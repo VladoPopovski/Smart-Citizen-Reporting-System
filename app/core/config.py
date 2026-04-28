@@ -20,10 +20,17 @@ class Settings(BaseSettings):
     project_name: str = "Smart Citizen Complaint Management System"
     api_v1_str: str = "/api/v1"
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/smart_citizen"
+    backend_cors_origins: list[str] = [
+        "http://127.0.0.1:8080",
+        "http://localhost:8080",
+    ]
+    backend_cors_origin_regex: str = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
-    # Supabase integration (placeholders):
-    # - In production you would validate JWT signatures using Supabase JWKS.
-    # - This template intentionally *does not* integrate Supabase SDKs.
+    # Supabase integration
+    supabase_url: str | None = None
+    supabase_anon_key: str | None = None
+    # Set to "authenticated" if you want strict audience checks.
+    supabase_jwt_audience: str | None = None
     supabase_mock_verify: bool = True
     dev_skip_auth: bool = False
 

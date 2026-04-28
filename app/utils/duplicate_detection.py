@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import math
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 from rapidfuzz import fuzz
 from sqlalchemy import select
@@ -34,8 +35,8 @@ def check_duplicate(
     longitude: float | None,
     created_at: datetime,
     db: Session,
-    exclude_id: int | None = None,
-) -> int | None:
+    exclude_id: UUID | None = None,
+) -> UUID | None:
     """
     Compare the incoming report against recent reports in the DB.
 
@@ -61,7 +62,7 @@ def check_duplicate(
 
     candidates = db.scalars(stmt).all()
 
-    best_id: int | None = None
+    best_id: UUID | None = None
     best_score: float = -1.0
 
     for candidate in candidates:
@@ -90,7 +91,7 @@ def check_duplicate(
             best_score = text_score
             best_id = candidate.id
             logger.info(
-                "Possible duplicate detected: incoming report matches report id=%d "
+                "Possible duplicate detected: incoming report matches report id=%s "
                 "(text_score=%.1f, distance check passed, within time window)",
                 candidate.id,
                 text_score,

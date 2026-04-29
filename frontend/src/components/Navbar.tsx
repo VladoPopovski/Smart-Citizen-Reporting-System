@@ -14,8 +14,8 @@ export function Navbar() {
     admin: "Администратор",
   };
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate("/");
   };
 

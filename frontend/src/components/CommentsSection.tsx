@@ -9,7 +9,7 @@ import { Loader2, MessageSquare } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface Props {
-  reportId: number;
+  reportId: string;
   comments: CommentRead[];
 }
 

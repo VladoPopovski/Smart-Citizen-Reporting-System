@@ -2,12 +2,10 @@ import { AppLayout } from "@/components/AppLayout";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { MapPin, Calendar, Eye } from "lucide-react";
+import { MapPin, Calendar } from "lucide-react";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { fetchReports, updateReportPriority, type PriorityValue } from "@/services/reports";
+import { fetchReports, updateReportPriority, updateReportStatus, updateReportCategory, type PriorityValue } from "@/services/reports";
 import { useLookups } from "@/hooks/useLookups";
 import { formatDate, formatCoords, deriveTitle, getStatusStyle, getPriorityLabel, getPriorityStyle } from "@/lib/reportHelpers";
 import { useToast } from "@/hooks/use-toast";
@@ -15,10 +13,9 @@ import { useToast } from "@/hooks/use-toast";
 const PRIORITY_OPTIONS: PriorityValue[] = ["Низок", "Среден", "Висок", "Итен"];
 
 export default function AssignedComplaintsPage() {
-  const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { categoryLabel, statusLabel } = useLookups();
+  const { categoryLabel, statusLabel, statuses, categories } = useLookups();
   const [statusFilter, setStatusFilter] = useState("all");
 
   const { data: reports = [] } = useQuery({
@@ -27,7 +24,7 @@ export default function AssignedComplaintsPage() {
   });
 
   const priorityMutation = useMutation({
-    mutationFn: ({ reportId, priority }: { reportId: number; priority: PriorityValue }) =>
+    mutationFn: ({ reportId, priority }: { reportId: string; priority: PriorityValue }) =>
       updateReportPriority(reportId, priority),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["reports"] });
@@ -37,6 +34,38 @@ export default function AssignedComplaintsPage() {
       toast({
         title: "Грешка",
         description: err.message ?? "Неуспешно ажурирање на приоритет.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const statusMutation = useMutation({
+    mutationFn: ({ reportId, status_id }: { reportId: string; status_id: number }) =>
+      updateReportStatus(reportId, status_id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      toast({ title: "Успешно", description: "Статусот е ажуриран." });
+    },
+    onError: (err: Error) => {
+      toast({
+        title: "Грешка",
+        description: err.message ?? "Неуспешно ажурирање на статус.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const categoryMutation = useMutation({
+    mutationFn: ({ reportId, category_id }: { reportId: string; category_id: number }) =>
+      updateReportCategory(reportId, category_id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      toast({ title: "Успешно", description: "Категоријата е ажурирана." });
+    },
+    onError: (err: Error) => {
+      toast({
+        title: "Грешка",
+        description: err.message ?? "Неуспешно ажурирање на категорија.",
         variant: "destructive",
       });
     },
@@ -68,29 +97,32 @@ export default function AssignedComplaintsPage() {
 
         <div className="space-y-3">
           {filtered.map((r) => (
-            <Card key={r.id} className="hover:shadow-sm transition-shadow">
-              <CardContent className="py-4 flex items-center justify-between">
-                <div className="flex-1 space-y-1">
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono text-sm text-muted-foreground">#{r.id}</span>
-                    <h3 className="font-semibold text-foreground">{deriveTitle(r.description)}</h3>
-                    <Badge variant="outline" className={getStatusStyle(r.status_id)}>
+            <Card
+              key={r.id}
+              className="hover:shadow-sm transition-shadow"
+            >
+              <CardContent className="py-4 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <span className="font-mono text-sm text-muted-foreground flex-shrink-0">#{r.id}</span>
+                    <h3 className="font-semibold text-foreground truncate">{deriveTitle(r.description)}</h3>
+                    <Badge variant="outline" className={`${getStatusStyle(r.status_id)} flex-shrink-0`}>
                       {statusLabel(r.status_id)}
                     </Badge>
-                    <Badge variant="secondary">{categoryLabel(r.category_id)}</Badge>
-                    <Badge variant="outline" className={getPriorityStyle(r.priority)}>
+                    <Badge variant="secondary" className="flex-shrink-0">{categoryLabel(r.category_id)}</Badge>
+                    <Badge variant="outline" className={`${getPriorityStyle(r.priority)} flex-shrink-0`}>
                       {getPriorityLabel(r.priority)}
                     </Badge>
                   </div>
-                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                    {r.latitude != null && r.longitude != null && (
-                      <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{formatCoords(r.latitude, r.longitude)}</span>
-                    )}
-                    <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />{formatDate(r.created_at)}</span>
-                    <span>корисник {r.user_id.slice(0, 8)}...</span>
-                  </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
+                  {r.latitude != null && r.longitude != null && (
+                    <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{formatCoords(r.latitude, r.longitude)}</span>
+                  )}
+                  <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />{formatDate(r.created_at)}</span>
+                  <span>корисник {r.user_id.slice(0, 8)}...</span>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
                   <Select
                     value={r.priority ?? undefined}
                     onValueChange={(value) => {
@@ -109,9 +141,46 @@ export default function AssignedComplaintsPage() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <Button variant="outline" size="sm" onClick={() => navigate(`/complaints/${r.id}`)}>
-                    <Eye className="mr-1 h-3.5 w-3.5" /> Преглед
-                  </Button>
+                  <Select
+                    value={r.status_id?.toString() ?? undefined}
+                    onValueChange={(value) => {
+                      const newStatusId = Number(value);
+                      if (newStatusId === r.status_id) return;
+                      statusMutation.mutate({ reportId: r.id, status_id: newStatusId });
+                    }}
+                    disabled={statusMutation.isPending}
+                  >
+                    <SelectTrigger className="w-[140px]">
+                      <SelectValue placeholder="Статус" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {statuses.map((s) => (
+                        <SelectItem key={s.id} value={s.id.toString()}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={r.category_id?.toString() ?? undefined}
+                    onValueChange={(value) => {
+                      const newCategoryId = Number(value);
+                      if (newCategoryId === r.category_id) return;
+                      categoryMutation.mutate({ reportId: r.id, category_id: newCategoryId });
+                    }}
+                    disabled={categoryMutation.isPending}
+                  >
+                    <SelectTrigger className="w-[140px]">
+                      <SelectValue placeholder="Категорија" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {categories.map((cat) => (
+                        <SelectItem key={cat.id} value={cat.id.toString()}>
+                          {cat.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </CardContent>
             </Card>

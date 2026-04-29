@@ -28,7 +28,7 @@ export default function ComplaintDetailPage() {
 
   const { data: report, isLoading, error } = useQuery({
     queryKey: ["reports", id],
-    queryFn: () => fetchReportById(Number(id)),
+    queryFn: () => fetchReportById(id as string),
     enabled: !!id,
     refetchInterval: (query) => (query.state.data?.category_id == null ? 2000 : false),
     refetchIntervalInBackground: true,
@@ -133,6 +133,11 @@ export default function ComplaintDetailPage() {
                     {getPriorityLabel(report.priority)}
                   </Badge>
                 </div>
+                {report.possible_duplicate_of != null && (
+                  <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-100">
+                    Оваа пријава е означена како можен дупликат на пријава #{report.possible_duplicate_of}.
+                  </div>
+                )}
                 {canEditPriority && (
                   <div className="space-y-2 rounded-md border p-3 bg-muted/20">
                     <p className="text-sm font-medium">Промени приоритет</p>

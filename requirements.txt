@@ -14,3 +14,4 @@ rapidfuzz>=3.0
 requests>=2.31.0
 PyJWT[crypto]>=2.8.0
 psycopg[binary]
+psycopg2-binary 

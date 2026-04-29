@@ -26,7 +26,8 @@ class Notification(Base):
         index=True,
     )
 
-    report_id: Mapped[int] = mapped_column(
+    report_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
         ForeignKey("reports.id", ondelete="CASCADE"),
         nullable=False,
         index=True,

@@ -9,7 +9,7 @@ class NotificationRead(BaseModel):
 
     id: int
     user_id: UUID
-    report_id: int
+    report_id: UUID
     message: str
     is_read: bool
     created_at: datetime

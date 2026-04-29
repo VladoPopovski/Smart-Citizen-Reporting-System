@@ -12,6 +12,7 @@ torch>=2.2.0
 openai>=1.0.0
 rapidfuzz>=3.0
 requests>=2.31.0
+reportlab>=4.4.10
 PyJWT[crypto]>=2.8.0
 psycopg[binary]
 psycopg2-binary 

@@ -7,15 +7,15 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models.attachment import Attachment
 from app.models.category import Category
+from app.models.comment import Comment
 from app.models.history import History
 from app.models.report import Report
-from app.models.comment import Comment
 from app.models.status import Status
 from app.schemas.attachment import AttachmentRead
 from app.schemas.report import (
@@ -76,7 +76,7 @@ def create_report(db: Session, *, report_in: ReportCreate, current_user: Current
 
     if possible_duplicate_of is not None:
         logger.warning(
-            "New report may be a duplicate of report id=%d — saving with flag set.",
+            "New report may be a duplicate of report id=%s — saving with flag set.",
             possible_duplicate_of,
         )
 
@@ -112,7 +112,7 @@ def _to_report_read(report: Report) -> ReportRead:
     )
 
 
-def run_report_ai_pipeline(report_id: int) -> None:
+def run_report_ai_pipeline(report_id: UUID) -> None:
     """
     Background AI pipeline for a report:
     - classify description -> set category_id (if still NULL)
@@ -130,12 +130,12 @@ def run_report_ai_pipeline(report_id: int) -> None:
     try:
         report = db.get(Report, report_id)
         if report is None:
-            logger.warning("AI pipeline: report_id=%d not found — skipping.", report_id)
+            logger.warning("AI pipeline: report_id=%s not found — skipping.", report_id)
             return
 
         categories = db.scalars(select(Category)).all()
         if not categories:
-            logger.warning("AI pipeline: no categories found — skipping for report_id=%d.", report_id)
+            logger.warning("AI pipeline: no categories found — skipping for report_id=%s.", report_id)
             categories_sorted: list[Category] = []
         else:
             categories_sorted = sorted(categories, key=lambda c: c.name.casefold())
@@ -158,7 +158,7 @@ def run_report_ai_pipeline(report_id: int) -> None:
                     min_confidence=settings.ai_min_confidence,
                 )
             except Exception:
-                logger.warning("AI unavailable — skipping for report_id=%d.", report_id, exc_info=True)
+                logger.warning("AI unavailable — skipping for report_id=%s.", report_id, exc_info=True)
                 predicted_label = None
 
         if report.category_id is None and predicted_label:
@@ -171,7 +171,7 @@ def run_report_ai_pipeline(report_id: int) -> None:
                 report.category_id = new_category_id
                 category_changed = True
                 logger.info(
-                    "Auto-assigned category_id=%d ('%s') for report_id=%d",
+                    "Auto-assigned category_id=%d ('%s') for report_id=%s",
                     new_category_id, predicted_label, report_id,
                 )
             else:
@@ -185,12 +185,12 @@ def run_report_ai_pipeline(report_id: int) -> None:
                 report.category_id = fallback_id
                 category_changed = True
                 logger.info(
-                    "Applied fallback category_id=%d ('%s') for report_id=%d",
+                    "Applied fallback category_id=%d ('%s') for report_id=%s",
                     fallback_id, settings.ai_default_category_name, report_id,
                 )
             else:
                 logger.warning(
-                    "Fallback category '%s' not found in DB — left NULL for report_id=%d.",
+                    "Fallback category '%s' not found in DB — left NULL for report_id=%s.",
                     settings.ai_default_category_name, report_id,
                 )
 
@@ -207,11 +207,11 @@ def run_report_ai_pipeline(report_id: int) -> None:
                 ).all()
                 report.priority = assign_priority(report.description, list(recent_descriptions))
                 db.commit()
-                logger.info("Auto-assigned priority='%s' for report_id=%d", report.priority, report_id)
+                logger.info("Auto-assigned priority='%s' for report_id=%s", report.priority, report_id)
             except Exception:
                 db.rollback()
                 logger.warning(
-                    "Priority assignment failed for report_id=%d — continuing pipeline.",
+                    "Priority assignment failed for report_id=%s — continuing pipeline.",
                     report_id,
                     exc_info=True,
                 )
@@ -241,10 +241,10 @@ def run_report_ai_pipeline(report_id: int) -> None:
             )
             report.ai_confirmation_text = mk_text
             db.commit()
-            logger.info("ai_confirmation_text saved for report_id=%d", report_id)
+            logger.info("ai_confirmation_text saved for report_id=%s", report_id)
         except Exception:
             logger.warning(
-                "Unexpected error saving ai_confirmation_text for report_id=%d — skipping.",
+                "Unexpected error saving ai_confirmation_text for report_id=%s — skipping.",
                 report_id,
                 exc_info=True,
             )
@@ -268,13 +268,13 @@ def run_report_ai_pipeline(report_id: int) -> None:
                 except Exception:
                     db.rollback()
                     logger.warning(
-                        "AI confirmation persistence failed for report_id=%d.", report_id, exc_info=True
+                        "AI confirmation persistence failed for report_id=%s.", report_id, exc_info=True
                     )
 
         elapsed_ms = (perf_counter() - total_start) * 1000
         logger.info("AI pipeline latency: %.0fms", elapsed_ms)
     except Exception:
-        logger.warning("AI pipeline failed for report_id=%d — skipping.", report_id, exc_info=True)
+        logger.warning("AI pipeline failed for report_id=%s — skipping.", report_id, exc_info=True)
     finally:
         db.close()
 
@@ -294,7 +294,7 @@ def list_reports(db: Session, *, current_user: CurrentUser) -> list[ReportRead]:
         return []
 
 
-def _get_or_404(db: Session, report_id: int) -> Report:
+def _get_or_404(db: Session, report_id: UUID) -> Report:
     report = db.get(Report, report_id)
     if report is None:
         raise HTTPException(status_code=404, detail="Report not found")
@@ -315,7 +315,7 @@ def _record_status_history(
     ))
 
 
-def get_report(db: Session, *, report_id: int, current_user: CurrentUser) -> ReportRead:
+def get_report(db: Session, *, report_id: UUID, current_user: CurrentUser) -> ReportRead:
     report = _get_or_404(db, report_id)
     if current_user.role == UserRole.citizen and report.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not allowed")
@@ -323,7 +323,7 @@ def get_report(db: Session, *, report_id: int, current_user: CurrentUser) -> Rep
 
 
 def update_report(
-    db: Session, *, report_id: int, report_in: ReportUpdate, current_user: CurrentUser
+    db: Session, *, report_id: UUID, report_in: ReportUpdate, current_user: CurrentUser
 ) -> ReportRead:
     report = _get_or_404(db, report_id)
     if current_user.role == UserRole.citizen and report.user_id != current_user.id:
@@ -348,12 +348,21 @@ def update_report(
 
 
 def update_status(
-    db: Session, *, report_id: int, status_in: StatusUpdate, current_user: CurrentUser
+    db: Session, *, report_id: UUID, status_in: StatusUpdate, current_user: CurrentUser
 ) -> ReportRead:
     report = _get_or_404(db, report_id)
-    if status_in.status_id != report.status_id:
+    status_changed = status_in.status_id != report.status_id
+    if status_changed:
         _record_status_history(db, report, status_in.status_id, current_user.id)
     report.status_id = status_in.status_id
+
+    # CR-06: when a report is closed, invite the citizen to rate it.
+    if status_changed:
+        new_status = db.get(Status, status_in.status_id)
+        if new_status is not None and new_status.name == "Closed":
+            from app.services.notification_service import create_rating_invitation_notification
+            create_rating_invitation_notification(db, report=report)
+
     db.commit()
     db.refresh(report)
     return _to_report_read(report)
@@ -362,7 +371,7 @@ def update_status(
 def update_priority(
     db: Session,
     *,
-    report_id: int,
+    report_id: UUID,
     priority_in: PriorityUpdate,
     current_user: CurrentUser,
 ) -> ReportRead:
@@ -373,7 +382,7 @@ def update_priority(
     return _to_report_read(report)
 
 
-def delete_report(db: Session, *, report_id: int, current_user: CurrentUser) -> None:
+def delete_report(db: Session, *, report_id: UUID, current_user: CurrentUser) -> None:
     report = _get_or_404(db, report_id)
     is_owner = report.user_id == current_user.id
     allowed = current_user.role == UserRole.admin or (
@@ -390,7 +399,7 @@ def delete_report(db: Session, *, report_id: int, current_user: CurrentUser) -> 
 # ---------------------------------------------------------------------------
 
 def list_comments(
-    db: Session, *, report_id: int, current_user: CurrentUser
+    db: Session, *, report_id: UUID, current_user: CurrentUser
 ) -> list[CommentRead]:
     report = _get_or_404(db, report_id)
     if current_user.role == UserRole.citizen and report.user_id != current_user.id:
@@ -404,7 +413,7 @@ def list_comments(
 
 
 def create_comment(
-    db: Session, *, report_id: int, comment_in: CommentCreate, current_user: CurrentUser
+    db: Session, *, report_id: UUID, comment_in: CommentCreate, current_user: CurrentUser
 ) -> CommentRead:
     if current_user.role not in [UserRole.officer, UserRole.admin]:
         raise HTTPException(status_code=403, detail="Only officers and admins can comment")
@@ -431,7 +440,7 @@ def create_comment(
 # ---------------------------------------------------------------------------
 
 def list_attachments(
-    db: Session, *, report_id: int, current_user: CurrentUser
+    db: Session, *, report_id: UUID, current_user: CurrentUser
 ) -> list[AttachmentRead]:
     report = _get_or_404(db, report_id)
     if current_user.role == UserRole.citizen and report.user_id != current_user.id:
@@ -447,7 +456,7 @@ def list_attachments(
 def create_attachment(
     db: Session,
     *,
-    report_id: int,
+    report_id: UUID,
     file_url: str,
     original_filename: str,
     content_type: str,
@@ -470,3 +479,48 @@ def create_attachment(
     db.commit()
     db.refresh(attachment)
     return AttachmentRead.model_validate(attachment)
+
+
+# ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
+
+def export_reports(
+    db: Session,
+    *,
+    status: str | None = None,
+    category: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> list[Report]:
+    """Return reports filtered for export, with category/status eagerly loaded.
+
+    Filters are applied conjunctively. An unknown status/category name yields
+    no matches (rather than being silently dropped) so the caller never gets
+    back a wider set than they asked for.
+    """
+    stmt = (
+        select(Report)
+        .options(joinedload(Report.category), joinedload(Report.status))
+        .order_by(Report.created_at.desc())
+    )
+
+    if status is not None:
+        status_row = db.scalars(select(Status).where(Status.name == status)).first()
+        if status_row is None:
+            return []
+        stmt = stmt.where(Report.status_id == status_row.id)
+
+    if category is not None:
+        category_row = db.scalars(select(Category).where(Category.name == category)).first()
+        if category_row is None:
+            return []
+        stmt = stmt.where(Report.category_id == category_row.id)
+
+    if date_from is not None:
+        stmt = stmt.where(Report.created_at >= date_from)
+
+    if date_to is not None:
+        stmt = stmt.where(Report.created_at <= date_to)
+
+    return list(db.scalars(stmt).unique().all())

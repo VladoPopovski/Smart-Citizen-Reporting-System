@@ -10,7 +10,7 @@ class CommentCreate(BaseModel):
 class CommentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    report_id: int
+    report_id: UUID
     user_id: UUID
     content: str
     created_at: datetime

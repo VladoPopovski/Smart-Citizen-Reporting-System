@@ -7,12 +7,28 @@ from app.models.report import Report
 from app.models.category import Category
 from app.models.status import Status
 from app.models.user import User
+from app.schemas.rating import CategoryRatingAvg
 from app.schemas.user import CurrentUser, UserRole
+from app.services import rating_service
 from app.utils.dependencies import require_roles
 import csv
 import io
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+
+
+@router.get("/ratings", response_model=list[CategoryRatingAvg])
+def get_category_ratings(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin)),
+) -> list[CategoryRatingAvg]:
+    """Average citizen rating per category (CR-06).
+
+    Originally specified as "по оддел" (per department); the supabase-integration
+    merge removed Report's department FK, so this aggregates by category — the
+    closest organizational dimension still in the data model.
+    """
+    return rating_service.average_ratings_by_category(db)
 
 @router.get("/summary")
 def get_analytics_summary(

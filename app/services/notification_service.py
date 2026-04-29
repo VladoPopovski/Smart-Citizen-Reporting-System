@@ -40,6 +40,26 @@ def create_comment_notification(
     )
 
 
+def create_rating_invitation_notification(db: Session, *, report: Report) -> None:
+    """Invite the report's owner to leave a rating after their report is closed (CR-06)."""
+    title_suffix = f': "{report.title}"' if report.title else "."
+    message = (
+        f"Your report #{report.id} has been closed{title_suffix} "
+        "Please leave a rating."
+    )
+    db.add(Notification(
+        user_id=report.user_id,
+        report_id=report.id,
+        message=message,
+        is_read=False,
+    ))
+    logger.info(
+        "Rating-invitation notification queued for user_id=%s on report_id=%d",
+        report.user_id,
+        report.id,
+    )
+
+
 def list_notifications(
     db: Session,
     *,

@@ -7,7 +7,7 @@ import { MapPin, Calendar } from "lucide-react";
 import { useState } from "react";
 import { fetchReports, updateReportPriority, updateReportStatus, updateReportCategory, type PriorityValue } from "@/services/reports";
 import { useLookups } from "@/hooks/useLookups";
-import { formatDate, formatCoords, deriveTitle, getStatusStyle, getPriorityLabel, getPriorityStyle } from "@/lib/reportHelpers";
+import { formatDate, formatCoords, deriveTitle, getStatusStyle, getPriorityLabel, getPriorityStyle, getCategoryMacedonianName } from "@/lib/reportHelpers";
 import { useToast } from "@/hooks/use-toast";
 
 const PRIORITY_OPTIONS: PriorityValue[] = ["Низок", "Среден", "Висок", "Итен"];
@@ -96,32 +96,33 @@ export default function AssignedComplaintsPage() {
         </div>
 
         <div className="space-y-3">
-          {filtered.map((r) => (
-            <Card
-              key={r.id}
-              className="hover:shadow-sm transition-shadow"
-            >
-              <CardContent className="py-4 space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <span className="font-mono text-sm text-muted-foreground flex-shrink-0">#{r.id}</span>
-                    <h3 className="font-semibold text-foreground truncate">{deriveTitle(r.description)}</h3>
-                    <Badge variant="outline" className={`${getStatusStyle(r.status_id)} flex-shrink-0`}>
-                      {statusLabel(r.status_id)}
-                    </Badge>
-                    <Badge variant="secondary" className="flex-shrink-0">{categoryLabel(r.category_id)}</Badge>
-                    <Badge variant="outline" className={`${getPriorityStyle(r.priority)} flex-shrink-0`}>
-                      {getPriorityLabel(r.priority)}
-                    </Badge>
+          {filtered.map((r) => {
+            const username = r.user_email ? r.user_email.split("@")[0] : r.user_id.slice(0, 8);
+            return (
+              <Card
+                key={r.id}
+                className="hover:shadow-sm transition-shadow"
+              >
+                <CardContent className="py-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <h3 className="font-semibold text-foreground truncate">{deriveTitle(r.description)}</h3>
+                      <Badge variant="outline" className={`${getStatusStyle(r.status_id)} flex-shrink-0`}>
+                        {statusLabel(r.status_id)}
+                      </Badge>
+                      <Badge variant="secondary" className="flex-shrink-0">{categoryLabel(r.category_id)}</Badge>
+                      <Badge variant="outline" className={`${getPriorityStyle(r.priority)} flex-shrink-0`}>
+                        {getPriorityLabel(r.priority)}
+                      </Badge>
+                    </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
-                  {r.latitude != null && r.longitude != null && (
-                    <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{formatCoords(r.latitude, r.longitude)}</span>
-                  )}
-                  <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />{formatDate(r.created_at)}</span>
-                  <span>корисник {r.user_id.slice(0, 8)}...</span>
-                </div>
+                  <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
+                    {r.latitude != null && r.longitude != null && (
+                      <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{formatCoords(r.latitude, r.longitude)}</span>
+                    )}
+                    <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />{formatDate(r.created_at)}</span>
+                    <span>корисник {username}</span>
+                  </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <Select
                     value={r.priority ?? undefined}
@@ -176,15 +177,16 @@ export default function AssignedComplaintsPage() {
                     <SelectContent>
                       {categories.map((cat) => (
                         <SelectItem key={cat.id} value={cat.id.toString()}>
-                          {cat.name}
+                          {getCategoryMacedonianName(cat.name)}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
 
         {filtered.length === 0 && (

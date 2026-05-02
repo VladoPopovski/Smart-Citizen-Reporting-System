@@ -73,13 +73,14 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("auth_token", session.access_token);
     setIsLoggedIn(true);
     const roleOverride = getStoredRoleOverride();
+    const sessionUserName = displayNameFromEmail(session.user.email);
     setRole(roleOverride ?? getRoleFromSession(session));
-    setUserName(displayNameFromEmail(session.user.email));
+    setUserName(sessionUserName);
 
     try {
       const me = await apiFetch<{ id: string; email: string | null; role: UserRole }>("/users/me");
       setRole(roleOverride ?? me.role);
-      setUserName(displayNameFromEmail(me.email));
+      setUserName(session.user.email ? sessionUserName : displayNameFromEmail(me.email));
     } catch {
       // Keep session-derived role/email if backend profile sync is not yet available.
     }

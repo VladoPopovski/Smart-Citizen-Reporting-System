@@ -7,6 +7,7 @@ import logo from "@/assets/Urban.png";
 export function Navbar() {
   const { role, userName, logout } = useRole();
   const navigate = useNavigate();
+  const avatarInitial = userName.trim().charAt(0).toUpperCase() || "К";
 
   const roleLabels: Record<string, string> = {
     citizen: "Корисник",
@@ -35,7 +36,7 @@ export function Navbar() {
         </button>
         <Avatar className="h-9 w-9">
           <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
-            {userName.split(" ").map(n => n[0]).join("")}
+            {avatarInitial}
           </AvatarFallback>
         </Avatar>
         <Button variant="ghost" size="sm" onClick={handleLogout} className="text-destructive hover:text-destructive">

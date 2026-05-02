@@ -32,7 +32,7 @@ export function formatCoords(lat: number, lng: number): string {
 }
 
 function normalizePriority(priority: string | null | undefined): string {
-  if (!priority) return "";
+  if (!priority || typeof priority !== "string") return "";
   return priority.trim().toLowerCase();
 }
 
@@ -60,4 +60,15 @@ export function getPriorityStyle(priority: string | null | undefined): string {
     return "bg-success/10 text-success border-success/20";
   }
   return "bg-muted text-muted-foreground";
+}
+
+export const CATEGORY_TRANSLATIONS: Record<string, string> = {
+  Environment: "Околина",
+  Infrastructure: "Инфраструктура",
+  Safety: "Безбедност",
+  Other: "Друго",
+};
+
+export function getCategoryMacedonianName(categoryName: string): string {
+  return CATEGORY_TRANSLATIONS[categoryName] || categoryName;
 }

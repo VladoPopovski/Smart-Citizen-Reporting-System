@@ -6,7 +6,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { fetchReports, type ReportRead } from "@/services/reports";
 import { useLookups } from "@/hooks/useLookups";
-import { deriveTitle, formatDate, getPriorityLabel, getPriorityStyle, getStatusStyle } from "@/lib/reportHelpers";
+import { deriveTitle, formatDate, getPriorityLabel, getPriorityStyle, getStatusStyle, getCategoryMacedonianName } from "@/lib/reportHelpers";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -87,7 +87,7 @@ export default function PublicMapPage() {
                 <SelectContent>
                   <SelectItem value="all">Сите категории</SelectItem>
                   {categories.map((c) => (
-                    <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                    <SelectItem key={c.id} value={String(c.id)}>{getCategoryMacedonianName(c.name)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -116,6 +116,9 @@ export default function PublicMapPage() {
                       </Badge>
                     </div>
                     <p className="text-xs text-muted-foreground line-clamp-2">{r.description}</p>
+                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
+                      {categoryLabel(r.category_id)}
+                    </Badge>
                     <div className="flex items-center justify-start">
                       <Badge variant="outline" className={`${getPriorityStyle(r.priority)} text-[10px] px-1.5 py-0 h-4`}>
                         {getPriorityLabel(r.priority)}
@@ -135,10 +138,9 @@ export default function PublicMapPage() {
           
           <div className="absolute bottom-4 left-4 bg-background/90 backdrop-blur-sm p-3 rounded-lg border border-border shadow-lg z-[1000] text-xs space-y-2">
             <p className="font-semibold border-bottom pb-1 mb-1">Легенда:</p>
-            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-blue-500 border border-white" /> Ново / Останато</div>
-            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-yellow-500 border border-white" /> Во тек</div>
-            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-green-500 border border-white" /> Решено</div>
-            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-red-500 border border-white" /> Одбиено</div>
+
+            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-blue-500 border border-white" /> Активен</div>
+            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-yellow-500 border border-white" /> Решен</div>
           </div>
         </div>
       </div>

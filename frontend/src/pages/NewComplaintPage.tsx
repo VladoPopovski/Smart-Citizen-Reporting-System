@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { createReport } from "@/services/reports";
 import { useLookups } from "@/hooks/useLookups";
 import LocationPicker from "@/components/LocationPicker";
+import { getCategoryMacedonianName } from "@/lib/reportHelpers";
 
 export default function NewComplaintPage() {
   const navigate = useNavigate();
@@ -85,7 +86,7 @@ export default function NewComplaintPage() {
                   <SelectTrigger id="category"><SelectValue placeholder="Изберете категорија" /></SelectTrigger>
                   <SelectContent>
                     {categories.map((c) => (
-                      <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                      <SelectItem key={c.id} value={String(c.id)}>{getCategoryMacedonianName(c.name)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

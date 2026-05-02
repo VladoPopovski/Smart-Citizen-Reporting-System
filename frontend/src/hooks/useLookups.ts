@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { fetchCategories, type Category } from "@/services/categories";
 import { fetchStatuses, type Status } from "@/services/statuses";
+import { getCategoryMacedonianName } from "@/lib/reportHelpers";
 
 export function useLookups() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -23,7 +24,8 @@ export function useLookups() {
 
   const categoryLabel = (id: number | null) => {
     if (id == null) return "Непознато";
-    return categories.find((c) => c.id === id)?.name ?? `Категорија #${id}`;
+    const categoryName = categories.find((c) => c.id === id)?.name;
+    return categoryName ? getCategoryMacedonianName(categoryName) : `Категорија #${id}`;
   };
 
   const statusLabel = (id: number | null) => {

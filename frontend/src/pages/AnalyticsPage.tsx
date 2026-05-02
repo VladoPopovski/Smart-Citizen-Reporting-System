@@ -8,8 +8,9 @@ import { TrendingUp, FileText, CheckCircle, Clock, Users, Download, FileJson, Fi
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend } from "recharts";
 import { fetchAnalyticsSummary, exportToCsv, exportToPdf } from "@/services/analytics";
 import { useToast } from "@/hooks/use-toast";
+import { getCategoryMacedonianName } from "@/lib/reportHelpers";
 
-const COLORS = ["hsl(142, 71%, 45%)", "hsl(220, 13%, 91%)"];
+const COLORS = ["hsl(142, 71%, 45%)", "hsl(38, 92%, 50%)"];
 
 export default function AnalyticsPage() {
   const { toast } = useToast();
@@ -88,8 +89,12 @@ export default function AnalyticsPage() {
     { label: "ВКУПНО ПРИЈАВИ", value: data.kpis.total, icon: FileText, trend: "+12.5%", color: "text-primary" },
     { label: "РЕШЕНИ СЛУЧАИ", value: data.kpis.resolved, icon: CheckCircle, trend: "+8.2%", color: "text-success" },
     { label: "ПРОСЕЧНО ВРЕМЕ", value: data.kpis.avgTime, icon: Clock, trend: "-1.1 ден", color: "text-warning" },
-    { label: "АКТИВНИ ГРАЃАНИ", value: data.kpis.activeCitizens.toLocaleString(), icon: Users, trend: "+5.4%", color: "text-info" },
+    { label: "АКТИВНИ ПРИЈАВИ", value: data.kpis.active.toLocaleString(), icon: Users, trend: "+5.4%", color: "text-info" },
   ];
+  const categoryChartData = data.categoryData.map((category) => ({
+    ...category,
+    name: getCategoryMacedonianName(category.name),
+  }));
 
   return (
     <AppLayout>
@@ -132,11 +137,11 @@ export default function AnalyticsPage() {
           <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle className="text-base">Пријави по категорија</CardTitle>
-              <p className="text-xs text-muted-foreground">Дистрибуција по оддел (решени наспроти вкупно)</p>
+              <p className="text-xs text-muted-foreground">Дистрибуција по оддел (активни и решени наспроти вкупно)</p>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={250}>
-                <BarChart data={data.categoryData}>
+                <BarChart data={categoryChartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(220, 13%, 91%)" />
                   <XAxis dataKey="name" tick={{ fontSize: 10 }} />
                   <YAxis tick={{ fontSize: 12 }} />
@@ -144,6 +149,7 @@ export default function AnalyticsPage() {
                   <Legend />
                   <Bar dataKey="complaints" name="Пријави" fill="hsl(217, 91%, 60%)" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="resolved" name="Решени" fill="hsl(142, 71%, 45%)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="active" name="Активни" fill="hsl(38, 92%, 50%)" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>
@@ -152,7 +158,7 @@ export default function AnalyticsPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Стапка на решавање</CardTitle>
-              <p className="text-xs text-muted-foreground">Решени наспроти нерешени</p>
+              <p className="text-xs text-muted-foreground">Решени наспроти активни</p>
             </CardHeader>
             <CardContent className="flex flex-col items-center">
               <ResponsiveContainer width="100%" height={180}>
@@ -162,6 +168,15 @@ export default function AnalyticsPage() {
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
+                  <Tooltip
+                    formatter={(value: number, name: string) => [value.toLocaleString(), name]}
+                    contentStyle={{
+                      borderRadius: 8,
+                      border: "1px solid hsl(var(--border))",
+                      backgroundColor: "hsl(var(--popover))",
+                      color: "hsl(var(--popover-foreground))",
+                    }}
+                  />
                 </PieChart>
               </ResponsiveContainer>
               <p className="text-3xl font-bold text-foreground -mt-2">{data.resolutionRate}%</p>
@@ -173,7 +188,7 @@ export default function AnalyticsPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Месечен тренд</CardTitle>
-            <p className="text-xs text-muted-foreground">Споредба меѓу пристигнати пријави и решени случаи</p>
+            <p className="text-xs text-muted-foreground">Споредба меѓу пристигнати, активни и решени пријави</p>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={250}>
@@ -185,6 +200,7 @@ export default function AnalyticsPage() {
                 <Legend />
                 <Line type="monotone" dataKey="complaints" name="Пријави" stroke="hsl(217, 91%, 60%)" strokeWidth={2} dot={{ r: 3 }} />
                 <Line type="monotone" dataKey="resolved" name="Решени" stroke="hsl(142, 71%, 45%)" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="active" name="Активни" stroke="hsl(38, 92%, 50%)" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>

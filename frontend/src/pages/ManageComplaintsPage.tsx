@@ -9,7 +9,7 @@ import { Search, Eye } from "lucide-react";
 import { useState } from "react";
 import { fetchReports, updateReportPriority, type PriorityValue } from "@/services/reports";
 import { useLookups } from "@/hooks/useLookups";
-import { deriveTitle, formatDate, getPriorityLabel, getPriorityStyle, getStatusStyle } from "@/lib/reportHelpers";
+import { deriveTitle, formatDate, getPriorityLabel, getPriorityStyle, getStatusStyle, getCategoryMacedonianName } from "@/lib/reportHelpers";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 
@@ -72,7 +72,7 @@ export default function ManageComplaintsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-muted-foreground">
-                    <th className="text-left py-3 px-2 font-medium">ID</th>
+                    {/* <th className="text-left py-3 px-2 font-medium">ID</th> */}
                     <th className="text-left py-3 px-2 font-medium">Наслов</th>
                     <th className="text-left py-3 px-2 font-medium">Граѓанин</th>
                     <th className="text-left py-3 px-2 font-medium">Категорија</th>
@@ -83,53 +83,39 @@ export default function ManageComplaintsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((r) => (
-                    <tr key={r.id} className="border-b last:border-0 hover:bg-secondary/50 transition-colors">
-                      <td className="py-3 px-2 font-mono text-muted-foreground">#{r.id}</td>
-                      <td className="py-3 px-2 font-medium text-foreground">{deriveTitle(r.description)}</td>
-                      <td className="py-3 px-2 text-muted-foreground">{r.user_id.slice(0, 8)}...</td>
-                      <td className="py-3 px-2 text-muted-foreground">{categoryLabel(r.category_id)}</td>
-                      <td className="py-3 px-2">
-                        <Badge variant="outline" className={getStatusStyle(r.status_id)}>
-                          {statusLabel(r.status_id)}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-2">
-                        <div className="flex items-center gap-2">
+                  {filtered.map((r) => {
+                    // Extract username from email
+                    let username = r.user_email ? r.user_email.split("@")[0] : r.user_id?.slice(0, 8);
+                    // Translate category name using shared helper
+                    let categoryName = categoryLabel(r.category_id);
+                    let mkCategory = getCategoryMacedonianName(categoryName);
+                    return (
+                      <tr key={r.id} className="border-b last:border-0 hover:bg-secondary/50 transition-colors">
+                        <td className="py-3 px-2 font-medium text-foreground">{deriveTitle(r.description)}</td>
+                        <td className="py-3 px-2 text-muted-foreground">{username}</td>
+                        <td className="py-3 px-2 text-muted-foreground">{mkCategory}</td>
+                        <td className="py-3 px-2">
+                          <Badge variant="outline" className={getStatusStyle(r.status_id)}>
+                            {statusLabel(r.status_id)}
+                          </Badge>
+                        </td>
+                        <td className="py-3 px-2">
                           <Badge variant="outline" className={getPriorityStyle(r.priority)}>
                             {getPriorityLabel(r.priority)}
                           </Badge>
-                          <Select
-                            value={r.priority ?? undefined}
-                            onValueChange={(value) => {
-                              const nextPriority = value as PriorityValue;
-                              if (nextPriority === r.priority) return;
-                              priorityMutation.mutate({ reportId: r.id, priority: nextPriority });
-                            }}
-                            disabled={priorityMutation.isPending}
-                          >
-                            <SelectTrigger className="h-8 w-[120px] text-xs">
-                              <SelectValue placeholder="Промени" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {PRIORITY_OPTIONS.map((option) => (
-                                <SelectItem key={option} value={option}>{option}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </td>
-                      <td className="py-3 px-2 text-muted-foreground">{formatDate(r.created_at)}</td>
-                      <td className="py-3 px-2">
-                        <Button variant="ghost" size="sm" onClick={() => navigate(`/complaints/${r.id}`)}>
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="py-3 px-2 text-muted-foreground">{formatDate(r.created_at)}</td>
+                        <td className="py-3 px-2">
+                          <Button variant="ghost" size="sm" onClick={() => navigate(`/complaints/${r.id}`)}>
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {!isLoading && filtered.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="py-8 text-center text-muted-foreground">
+                      <td colSpan={7} className="py-8 text-center text-muted-foreground">
                         Нема пријави за прикажување.
                       </td>
                     </tr>

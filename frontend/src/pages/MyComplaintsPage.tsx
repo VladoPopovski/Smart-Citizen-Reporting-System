@@ -11,7 +11,7 @@ import { Search, Plus, MapPin, Calendar } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { fetchReports } from "@/services/reports";
 import { useLookups } from "@/hooks/useLookups";
-import { deriveTitle, formatDate, formatCoords, getPriorityLabel, getPriorityStyle, getStatusStyle } from "@/lib/reportHelpers";
+import { deriveTitle, formatDate, formatCoords, getPriorityLabel, getPriorityStyle, getStatusStyle, getCategoryMacedonianName } from "@/lib/reportHelpers";
 
 export default function MyComplaintsPage() {
   const navigate = useNavigate();
@@ -67,7 +67,7 @@ export default function MyComplaintsPage() {
               <SelectContent>
                 <SelectItem value="all">Сите категории</SelectItem>
                 {categories.map((c) => (
-                  <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                  <SelectItem key={c.id} value={String(c.id)}>{getCategoryMacedonianName(c.name)}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

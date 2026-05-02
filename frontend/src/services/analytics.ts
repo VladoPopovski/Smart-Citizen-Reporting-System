@@ -4,6 +4,7 @@ export interface AnalyticsSummary {
   kpis: {
     total: number;
     resolved: number;
+    active: number;
     avgTime: string;
     activeCitizens: number;
   };
@@ -11,6 +12,7 @@ export interface AnalyticsSummary {
     name: string;
     complaints: number;
     resolved: number;
+    active: number;
   }>;
   pieData: Array<{
     name: string;
@@ -20,6 +22,7 @@ export interface AnalyticsSummary {
     month: string;
     complaints: number;
     resolved: number;
+    active: number;
   }>;
   resolutionRate: number;
 }

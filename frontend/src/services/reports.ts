@@ -25,6 +25,7 @@ export interface ReportRead {
   category_id: number | null;
   status_id: number | null;
   user_id: string;
+  user_email?: string; // Added user_email
   created_at: string;
   ai_confirmation_text?: string | null;
   possible_duplicate_of?: string | null;
@@ -171,6 +172,7 @@ function normalizeReport(row: any): ReportRead {
     category_id: row.category_id ?? null,
     status_id: row.status_id ?? null,
     user_id: row.user_id,
+    user_email: row.users?.email ?? undefined, // Added user_email
     created_at: row.created_at,
     ai_confirmation_text: row.ai_confirmation_text ?? null,
     possible_duplicate_of: row.possible_duplicate_of ?? null,
@@ -199,7 +201,7 @@ async function getCurrentUserId(): Promise<string> {
 export async function fetchReports(): Promise<ReportRead[]> {
   const { data, error } = await supabase
     .from("reports")
-    .select("*")
+    .select("*, users: user_id (email)") // Join users table to get email
     .order("created_at", { ascending: false });
 
   if (error) {

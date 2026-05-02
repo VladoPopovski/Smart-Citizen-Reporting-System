@@ -228,6 +228,7 @@ export async function fetchReportById(id: string): Promise<ReportRead> {
 
 export async function createReport(data: ReportCreate): Promise<ReportRead> {
   const userId = await getCurrentUserId();
+  const reportId = crypto.randomUUID();
 
   let analysis: AnalyzeReportResponse | null = null;
   try {
@@ -249,6 +250,7 @@ export async function createReport(data: ReportCreate): Promise<ReportRead> {
   const possibleDuplicateOf = await findPossibleDuplicateReportId(data);
 
   const payload = {
+    id: reportId,
     description: data.description,
     latitude: data.latitude,
     longitude: data.longitude,

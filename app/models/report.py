@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, Text, Uuid, func
+from sqlalchemy import DateTime, Float, ForeignKey, String, Text, Uuid, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base_class import Base
@@ -21,7 +21,12 @@ if TYPE_CHECKING:
 class Report(Base):
     __tablename__ = "reports"
 
-    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        server_default=text("gen_random_uuid()"),
+    )
     description: Mapped[str] = mapped_column(Text, nullable=False)
     priority: Mapped[str | None] = mapped_column(String(50), nullable=True)
 

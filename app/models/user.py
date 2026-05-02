@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, Enum as SAEnum, String, Uuid, func
+from sqlalchemy import DateTime, Enum as SAEnum, String, Uuid, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base_class import Base
@@ -24,7 +24,12 @@ class UserRole(str, enum.Enum):
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        server_default=text("gen_random_uuid()"),
+    )
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
     full_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     role: Mapped[UserRole] = mapped_column(

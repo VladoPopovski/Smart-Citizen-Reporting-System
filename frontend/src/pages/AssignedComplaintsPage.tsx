@@ -9,7 +9,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchReports, updateReportPriority, updateReportStatus, updateReportCategory, type PriorityValue } from "@/services/reports";
 import { useLookups } from "@/hooks/useLookups";
-import { formatDate, formatCoords, deriveTitle, getStatusStyle, getPriorityLabel, getPriorityStyle, getCategoryMacedonianName } from "@/lib/reportHelpers";
+import { formatDate, formatCoords, deriveTitle, getStatusStyle, isActiveStatus, getPriorityLabel, getPriorityStyle, getCategoryMacedonianName } from "@/lib/reportHelpers";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -22,7 +22,7 @@ export default function AssignedComplaintsPage() {
   const { categoryLabel, statusLabel, statuses, categories } = useLookups();
   const [statusFilter, setStatusFilter] = useState("all");
 
-  const { data: reports = [] } = useQuery({
+  const { data: reports = [], isLoading } = useQuery({
     queryKey: ["reports"],
     queryFn: fetchReports,
   });
@@ -75,11 +75,11 @@ export default function AssignedComplaintsPage() {
     },
   });
 
-  const assigned = reports.filter((r) => r.status_id === 1 || r.status_id === 2);
+  const assigned = reports.filter((r) => isActiveStatus(statusLabel(r.status_id)));
   const filtered =
     statusFilter === "all"
       ? assigned
-      : assigned.filter((r) => String(r.status_id) === statusFilter);
+      : assigned.filter((r) => statusLabel(r.status_id) === statusFilter);
 
   return (
       <div className="space-y-6">
@@ -92,8 +92,7 @@ export default function AssignedComplaintsPage() {
             <SelectTrigger className="w-40" aria-label="Филтрирај по статус"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Сите</SelectItem>
-              <SelectItem value="1">Нова</SelectItem>
-              <SelectItem value="2">Во тек</SelectItem>
+              <SelectItem value="Активен">Активен</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -123,7 +122,7 @@ export default function AssignedComplaintsPage() {
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3 flex-1 min-w-0">
                       <h3 className="font-semibold text-foreground truncate group-hover:text-primary transition-colors">{deriveTitle(r.description)}</h3>
-                      <Badge variant="outline" className={`${getStatusStyle(r.status_id)} flex-shrink-0`}>
+                      <Badge variant="outline" className={`${getStatusStyle(statusLabel(r.status_id))} flex-shrink-0`}>
                         {statusLabel(r.status_id)}
                       </Badge>
                       <Badge variant="secondary" className="flex-shrink-0 text-[10px]">{categoryLabel(r.category_id)}</Badge>

@@ -3,6 +3,8 @@ import { fetchCategories, type Category } from "@/services/categories";
 import { fetchStatuses, type Status } from "@/services/statuses";
 import { getCategoryMacedonianName } from "@/lib/reportHelpers";
 
+const ALLOWED_STATUSES = new Set(["активен", "решен"]);
+
 export function useLookups() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [statuses, setStatuses] = useState<Status[]>([]);
@@ -14,7 +16,7 @@ export function useLookups() {
       .then(([cats, stats]) => {
         if (!cancelled) {
           setCategories(cats);
-          setStatuses(stats);
+          setStatuses(stats.filter(s => ALLOWED_STATUSES.has(s.name.trim().toLowerCase())));
         }
       })
       .catch(() => {})

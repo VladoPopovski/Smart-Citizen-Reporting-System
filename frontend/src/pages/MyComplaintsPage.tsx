@@ -100,7 +100,7 @@ export default function MyComplaintsPage() {
                 <CardContent className="p-5 space-y-3">
                   <div className="flex justify-between items-start">
                     <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors line-clamp-2">{deriveTitle(r.description)}</h3>
-                    <Badge variant="outline" className={getStatusStyle(r.status_id)}>{statusLabel(r.status_id)}</Badge>
+                    <Badge variant="outline" className={getStatusStyle(statusLabel(r.status_id))}>{statusLabel(r.status_id)}</Badge>
                   </div>
                   <p className="text-sm text-muted-foreground line-clamp-2">{r.description}</p>
                   {r.latitude != null && r.longitude != null && (

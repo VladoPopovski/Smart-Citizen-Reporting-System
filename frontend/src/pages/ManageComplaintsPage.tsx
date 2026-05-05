@@ -133,7 +133,7 @@ export default function ManageComplaintsPage() {
                           }}
                           disabled={statusMutation.isPending}
                         >
-                          <SelectTrigger className={`w-[130px] h-8 text-xs ${getStatusStyle(r.status_id)}`} aria-label="Промени статус">
+                          <SelectTrigger className={`w-[130px] h-8 text-xs ${getStatusStyle(statusLabel(r.status_id))}`} aria-label="Промени статус">
                             <SelectValue placeholder="Статус" />
                           </SelectTrigger>
                           <SelectContent>

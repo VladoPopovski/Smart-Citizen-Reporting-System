@@ -33,7 +33,7 @@ from app.utils.duplicate_detection import check_duplicate
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SUBMITTED_STATUS = "Submitted"
+DEFAULT_SUBMITTED_STATUS = "Активен"
 
 
 def _normalize_category_key(value: str) -> str:
@@ -54,7 +54,7 @@ def create_report(db: Session, *, report_in: ReportCreate, current_user: Current
     now = datetime.now(tz=timezone.utc)
 
     default_status_id = db.scalar(
-        select(Status.id).where(func.lower(Status.name) == DEFAULT_SUBMITTED_STATUS.lower())
+        select(Status.id).where(Status.name == DEFAULT_SUBMITTED_STATUS)
     )
 
     category_id = report_in.category_id
@@ -364,7 +364,7 @@ def update_status(
                 create_rating_invitation_notification,
             )
             create_status_change_notification(db, report=report, new_status_name=new_status.name)
-            if new_status.name == "Closed":
+            if new_status.name.strip().casefold() in {"решен", "решена", "решено", "решени", "closed"}:
                 create_rating_invitation_notification(db, report=report)
 
     db.commit()

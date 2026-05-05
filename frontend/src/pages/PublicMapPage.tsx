@@ -134,7 +134,7 @@ export default function PublicMapPage() {
                   <div className="p-1 space-y-2 min-w-[200px]">
                     <div className="flex justify-between items-start gap-2">
                       <h3 className="font-bold text-sm leading-tight">{deriveTitle(r.description)}</h3>
-                      <Badge className={`${getStatusStyle(r.status_id)} text-[10px] px-1.5 py-0 h-4`}>
+                      <Badge className={`${getStatusStyle(statusLabel(r.status_id))} text-[10px] px-1.5 py-0 h-4`}>
                         {statusLabel(r.status_id)}
                       </Badge>
                     </div>

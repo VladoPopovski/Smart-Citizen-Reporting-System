@@ -1,15 +1,8 @@
-// Status style mapping (fallback visual styles by status_id)
-const statusStyles: Record<number, string> = {
-  1: "bg-info/10 text-info border-info/20",
-  2: "bg-warning/10 text-warning border-warning/20",
-  3: "bg-muted text-muted-foreground",
-  4: "bg-success/10 text-success border-success/20",
-  5: "bg-destructive/10 text-destructive border-destructive/20",
-};
-
-export function getStatusStyle(id: number | null): string {
-  if (id == null) return "bg-muted text-muted-foreground";
-  return statusStyles[id] ?? "bg-muted text-muted-foreground";
+export function getStatusStyle(statusName: string | null | undefined): string {
+  const n = (statusName ?? "").trim().toLowerCase();
+  if (RESOLVED_STATUS_NAMES.has(n)) return "bg-success/10 text-success border-success/20";
+  if (ACTIVE_STATUS_NAMES.has(n))   return "bg-info/10 text-info border-info/20";
+  return "bg-muted text-muted-foreground";
 }
 
 export function deriveTitle(description: string, maxLen = 50): string {

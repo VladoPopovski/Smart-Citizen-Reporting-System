@@ -18,14 +18,14 @@ from app.schemas.user import CurrentUser, UserRole
 
 logger = logging.getLogger(__name__)
 
-CLOSED_STATUS_NAME = "Closed"
+_CLOSED_NAMES = {"решен", "решена", "решено", "решени", "closed"}
 
 
 def _is_status_closed(db: Session, status_id: int | None) -> bool:
     if status_id is None:
         return False
     row = db.get(Status, status_id)
-    return row is not None and row.name == CLOSED_STATUS_NAME
+    return row is not None and row.name.strip().casefold() in _CLOSED_NAMES
 
 
 def _get_report_or_404(db: Session, report_id: UUID) -> Report:

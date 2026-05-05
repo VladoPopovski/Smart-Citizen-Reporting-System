@@ -98,7 +98,7 @@ def get_category_ratings(
 @router.get("/summary")
 def get_analytics_summary(
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.admin))
+    current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin))
 ):
     resolved_status_ids = _status_ids_for_names(db, RESOLVED_STATUS_NAMES)
     active_status_ids = _status_ids_for_names(db, ACTIVE_STATUS_NAMES)

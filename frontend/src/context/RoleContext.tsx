@@ -83,6 +83,12 @@ export function RoleProvider({ children }: { children: ReactNode }) {
 
     try {
       const me = await apiFetch<{ id: string; email: string | null; role: UserRole }>("/users/me");
+      if (roleOverride && roleOverride !== me.role) {
+        await apiFetch("/users/me/role", {
+          method: "PATCH",
+          body: JSON.stringify({ role: roleOverride }),
+        });
+      }
       setRole(roleOverride ?? me.role);
       setUserName(session.user.email ? sessionUserName : displayNameFromEmail(me.email));
       setUserId(me.id);

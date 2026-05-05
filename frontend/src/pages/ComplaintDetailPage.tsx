@@ -134,7 +134,7 @@ export default function ComplaintDetailPage() {
                       )}
                     </div>
                   </div>
-                  <Badge className={getStatusStyle(report.status_id)}>{statusLabel(report.status_id)}</Badge>
+                  <Badge className={getStatusStyle(statusLabel(report.status_id))}>{statusLabel(report.status_id)}</Badge>
                 </div>
               </CardHeader>
               <CardContent className="space-y-6">

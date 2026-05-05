@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AppLayout } from "@/components/AppLayout";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -12,7 +11,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Map as MapIcon, Filter } from "lucide-react";
+import { Map as MapIcon, Filter, Loader2, Plus } from "lucide-react";
 
 // Fix default marker icon
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
@@ -60,7 +59,6 @@ export default function PublicMapPage() {
   });
 
   return (
-    <AppLayout>
       <div className="h-[calc(100vh-8rem)] flex flex-col gap-4">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
@@ -96,7 +94,31 @@ export default function PublicMapPage() {
         </div>
 
         <div className="flex-1 rounded-xl overflow-hidden border border-border relative z-0">
-          <MapContainer center={[41.9981, 21.4254]} zoom={13} style={{ height: "100%", width: "100%" }}>
+          {isLoading && (
+            <div className="absolute inset-0 bg-background/50 backdrop-blur-[2px] z-[1001] flex flex-col items-center justify-center gap-2">
+              <Loader2 className="h-8 w-8 text-primary animate-spin" />
+              <p className="text-sm font-medium">Се вчитува мапата...</p>
+            </div>
+          )}
+
+          {!isLoading && filteredReports.length === 0 && (
+            <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 z-[1001] flex justify-center px-4">
+              <div className="bg-background/90 backdrop-blur-sm p-6 rounded-xl border shadow-xl text-center space-y-4 max-w-sm">
+                <div className="bg-muted w-12 h-12 rounded-full flex items-center justify-center mx-auto">
+                  <MapIcon className="h-6 w-6 text-muted-foreground" />
+                </div>
+                <div className="space-y-1">
+                  <p className="font-medium text-foreground">Не се пронајдени пријави на мапата.</p>
+                  <p className="text-xs text-muted-foreground">Пробајте да ги промените филтрите или бидете првиот што ќе поднесе нов проблем.</p>
+                </div>
+                <Button size="sm" onClick={() => navigate("/new-complaint")} className="w-full">
+                   <Plus className="mr-2 h-4 w-4" /> Пријави проблем
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <MapContainer center={[41.9981, 21.4254]} zoom={13} style={{ height: "100%", width: "100%" }} aria-label="Интерактивна мапа со пријави">
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -106,6 +128,7 @@ export default function PublicMapPage() {
                 key={r.id} 
                 position={[r.latitude!, r.longitude!]} 
                 icon={getMarkerIcon(r.status_id)}
+                aria-label={`Локација: ${deriveTitle(r.description)}`}
               >
                 <Popup className="custom-popup">
                   <div className="p-1 space-y-2 min-w-[200px]">
@@ -144,6 +167,5 @@ export default function PublicMapPage() {
           </div>
         </div>
       </div>
-    </AppLayout>
   );
 }

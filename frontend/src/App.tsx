@@ -4,6 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { RoleProvider, useRole } from "@/context/RoleContext";
+import { AppLayout } from "@/components/AppLayout";
 import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
 import HomePage from "./pages/HomePage";
@@ -15,6 +16,8 @@ import AssignedComplaintsPage from "./pages/AssignedComplaintsPage";
 import ManageComplaintsPage from "./pages/ManageComplaintsPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
 import PublicMapPage from "./pages/PublicMapPage";
+import SettingsPage from "./pages/SettingsPage";
+import ServerError from "./pages/ServerError";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,46 +35,52 @@ function AppRoutes() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage mode="login" />} />
         <Route path="/register" element={<LoginPage mode="register" />} />
+        <Route path="/error" element={<ServerError />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     );
   }
 
   return (
-    <Routes>
-      {/* Shared routes for all authenticated users */}
-      <Route path="/public-map" element={<PublicMapPage />} />
+    <AppLayout>
+      <Routes>
+        {/* Shared routes for all authenticated users */}
+        <Route path="/public-map" element={<PublicMapPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/error" element={<ServerError />} />
 
-      {role === "citizen" && (
-        <>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/my-complaints" element={<MyComplaintsPage />} />
-          <Route path="/new-complaint" element={<NewComplaintPage />} />
-          <Route path="/complaints/:id" element={<ComplaintDetailPage />} />
-        </>
-      )}
+        {role === "citizen" && (
+          <>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/my-complaints" element={<MyComplaintsPage />} />
+            <Route path="/new-complaint" element={<NewComplaintPage />} />
+            <Route path="/complaints/:id" element={<ComplaintDetailPage />} />
+          </>
+        )}
 
-      {role === "officer" && (
-        <>
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/assigned-complaints" element={<AssignedComplaintsPage />} />
-          <Route path="/complaints/:id" element={<ComplaintDetailPage />} />
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        </>
-      )}
+        {role === "officer" && (
+          <>
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/assigned-complaints" element={<AssignedComplaintsPage />} />
+            <Route path="/analytics" element={<AnalyticsPage />} />
+            <Route path="/complaints/:id" element={<ComplaintDetailPage />} />
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          </>
+        )}
 
-      {role === "admin" && (
-        <>
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/manage-complaints" element={<ManageComplaintsPage />} />
-          <Route path="/analytics" element={<AnalyticsPage />} />
-          <Route path="/complaints/:id" element={<ComplaintDetailPage />} />
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        </>
-      )}
+        {role === "admin" && (
+          <>
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/manage-complaints" element={<ManageComplaintsPage />} />
+            <Route path="/analytics" element={<AnalyticsPage />} />
+            <Route path="/complaints/:id" element={<ComplaintDetailPage />} />
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          </>
+        )}
 
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </AppLayout>
   );
 }
 

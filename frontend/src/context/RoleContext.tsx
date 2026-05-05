@@ -11,6 +11,7 @@ interface RoleContextType {
   role: UserRole;
   setRole: (role: UserRole) => void;
   userName: string;
+  userId: string | null;
   isLoggedIn: boolean;
   isAuthLoading: boolean;
   login: (email: string, password: string, selectedRole: UserRole) => Promise<void>;
@@ -25,6 +26,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [userName, setUserName] = useState("Корисник");
+  const [userId, setUserId] = useState<string | null>(null);
 
   const getRoleFromSession = (session: Session): UserRole => {
     const raw =
@@ -67,11 +69,13 @@ export function RoleProvider({ children }: { children: ReactNode }) {
       setIsLoggedIn(false);
       setRole("citizen");
       setUserName("Корисник");
+      setUserId(null);
       return;
     }
 
     localStorage.setItem("auth_token", session.access_token);
     setIsLoggedIn(true);
+    setUserId(session.user.id);
     const roleOverride = getStoredRoleOverride();
     const sessionUserName = displayNameFromEmail(session.user.email);
     setRole(roleOverride ?? getRoleFromSession(session));
@@ -81,6 +85,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
       const me = await apiFetch<{ id: string; email: string | null; role: UserRole }>("/users/me");
       setRole(roleOverride ?? me.role);
       setUserName(session.user.email ? sessionUserName : displayNameFromEmail(me.email));
+      setUserId(me.id);
     } catch {
       // Keep session-derived role/email if backend profile sync is not yet available.
     }
@@ -149,11 +154,12 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     setIsLoggedIn(false);
     setRole("citizen");
     setUserName("Корисник");
+    setUserId(null);
   };
 
   const contextValue = useMemo(
-    () => ({ role, setRole, userName, isLoggedIn, isAuthLoading, login, register, logout }),
-    [role, userName, isLoggedIn, isAuthLoading],
+    () => ({ role, setRole, userName, userId, isLoggedIn, isAuthLoading, login, register, logout }),
+    [role, userName, userId, isLoggedIn, isAuthLoading],
   );
 
   return (

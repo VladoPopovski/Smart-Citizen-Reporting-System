@@ -356,12 +356,16 @@ def update_status(
         _record_status_history(db, report, status_in.status_id, current_user.id)
     report.status_id = status_in.status_id
 
-    # CR-06: when a report is closed, invite the citizen to rate it.
     if status_changed:
         new_status = db.get(Status, status_in.status_id)
-        if new_status is not None and new_status.name == "Closed":
-            from app.services.notification_service import create_rating_invitation_notification
-            create_rating_invitation_notification(db, report=report)
+        if new_status is not None:
+            from app.services.notification_service import (
+                create_status_change_notification,
+                create_rating_invitation_notification,
+            )
+            create_status_change_notification(db, report=report, new_status_name=new_status.name)
+            if new_status.name == "Closed":
+                create_rating_invitation_notification(db, report=report)
 
     db.commit()
     db.refresh(report)

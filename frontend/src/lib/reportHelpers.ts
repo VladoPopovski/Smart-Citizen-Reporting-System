@@ -72,3 +72,50 @@ export const CATEGORY_TRANSLATIONS: Record<string, string> = {
 export function getCategoryMacedonianName(categoryName: string): string {
   return CATEGORY_TRANSLATIONS[categoryName] || categoryName;
 }
+
+const ACTIVE_STATUS_NAMES = new Set([
+  "active",
+  "aktiven",
+  "aktivna",
+  "aktivni",
+  "активен",
+  "активна",
+  "активно",
+  "активни",
+  "submitted",
+  "in progress",
+  "pending",
+  "нов",
+  "нова",
+  "поднесен",
+  "поднесена",
+  "во тек",
+  "на чекање",
+]);
+
+const RESOLVED_STATUS_NAMES = new Set([
+  "resolved",
+  "closed",
+  "resen",
+  "reshen",
+  "решен",
+  "решена",
+  "решено",
+  "решени",
+  "затворен",
+  "затворена",
+  "затворено",
+  "затворени",
+]);
+
+function normalizeStatusName(status: string): string {
+  return status.trim().toLowerCase().replace(/[_-]/g, " ").replace(/\s+/g, " ");
+}
+
+export function isActiveStatus(status: string): boolean {
+  return ACTIVE_STATUS_NAMES.has(normalizeStatusName(status));
+}
+
+export function isResolvedStatus(status: string): boolean {
+  return RESOLVED_STATUS_NAMES.has(normalizeStatusName(status));
+}

@@ -74,13 +74,19 @@ export default function LocationPicker({ lat, lng, onChange }: Props) {
           value={search} 
           onChange={(e) => setSearch(e.target.value)}
           className="text-sm"
+          aria-label="Пребарај локација на мапа"
         />
-        <Button type="submit" size="sm" disabled={loading}>
+        <Button type="submit" size="sm" disabled={loading} aria-label="Пребарај">
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
         </Button>
       </form>
       <div className="rounded-md overflow-hidden border border-border" style={{ height: 350 }}>
-        <MapContainer center={mapCenter} zoom={13} style={{ height: "100%", width: "100%" }}>
+        <MapContainer 
+          center={mapCenter} 
+          zoom={13} 
+          style={{ height: "100%", width: "100%" }}
+          aria-label="Интерактивна мапа за избор на локација"
+        >
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

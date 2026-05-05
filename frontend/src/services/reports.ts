@@ -33,6 +33,20 @@ export interface ReportRead {
   comments: CommentRead[];
 }
 
+export interface RatingRead {
+  id: number;
+  report_id: string;
+  user_id: string;
+  stars: number;
+  comment?: string | null;
+  created_at: string;
+}
+
+export interface RatingCreate {
+  stars: number;
+  comment?: string | null;
+}
+
 export interface ReportCreate {
   description: string;
   latitude: number | null;
@@ -201,7 +215,7 @@ async function getCurrentUserId(): Promise<string> {
 export async function fetchReports(): Promise<ReportRead[]> {
   const { data, error } = await supabase
     .from("reports")
-    .select("*, users: user_id (email)") // Join users table to get email
+    .select("*, users: user_id (email)")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -311,7 +325,10 @@ export function updateReportPriority(reportId: string, priority: PriorityValue):
 }
 
 export function updateReportStatus(reportId: string, status_id: number): Promise<ReportRead> {
-  return updateReport(reportId, { status_id });
+  return apiFetch<ReportRead>(`/reports/${reportId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status_id }),
+  });
 }
 
 export function updateReportCategory(reportId: string, category_id: number): Promise<ReportRead> {
@@ -346,4 +363,21 @@ export async function fetchReportHistory(reportId: string): Promise<HistoryRead[
   }
 
   return data ?? [];
+}
+
+export async function fetchRating(reportId: string): Promise<RatingRead | null> {
+  try {
+    return await apiFetch<RatingRead>(`/reports/${reportId}/rating`);
+  } catch (err: any) {
+    // If 404, it just means no rating exists yet
+    if (err.message?.includes("404")) return null;
+    throw err;
+  }
+}
+
+export async function createRating(reportId: string, data: RatingCreate): Promise<RatingRead> {
+  return apiFetch<RatingRead>(`/reports/${reportId}/rating`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
 }

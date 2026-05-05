@@ -5,6 +5,7 @@ from datetime import datetime
 from app.db.session import get_db
 from app.models.report import Report
 from app.models.category import Category
+from app.models.history import History
 from app.models.status import Status
 from app.models.user import User
 from app.schemas.rating import CategoryRatingAvg
@@ -108,9 +109,26 @@ def get_analytics_summary(
     active_reports = _count_reports(db, _status_filter(active_status_ids))
     active_citizens = db.scalar(select(func.count(User.id)).where(User.role == "citizen")) or 0
     
-    # Simple average resolution time (placeholder logic)
-    # In a real app, we would join with history and calculate diff between created_at and 'resolved' history entry
-    avg_resolution_time = "3.2 дена" 
+    # Average resolution time: earliest resolved history entry minus report creation time
+    if resolved_status_ids:
+        first_resolved = (
+            select(History.report_id, func.min(History.created_at).label("resolved_at"))
+            .where(History.status_id.in_(resolved_status_ids))
+            .group_by(History.report_id)
+            .subquery()
+        )
+        avg_seconds = db.scalar(
+            select(func.avg(
+                func.extract("epoch", first_resolved.c.resolved_at)
+                - func.extract("epoch", Report.created_at)
+            )).join(first_resolved, Report.id == first_resolved.c.report_id)
+        )
+        if avg_seconds and avg_seconds > 0:
+            avg_resolution_time = f"{round(avg_seconds / 86400, 1)} дена"
+        else:
+            avg_resolution_time = "N/A"
+    else:
+        avg_resolution_time = "N/A"
 
     # BarChart: Reports by category
     categories = db.scalars(select(Category)).all()

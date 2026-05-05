@@ -1,17 +1,20 @@
 import { useParams, useNavigate } from "react-router-dom";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AppLayout } from "@/components/AppLayout";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ChevronLeft, MapPin, Calendar, Tag, History, AlertTriangle } from "lucide-react";
-import { fetchReportById, updateReportPriority, type PriorityValue } from "@/services/reports";
+import { ChevronLeft, MapPin, Calendar, Tag, History, AlertTriangle, Star, MessageCircle } from "lucide-react";
+import { fetchReportById, updateReportPriority, type PriorityValue, fetchRating } from "@/services/reports";
+import { fetchCategoryRatings } from "@/services/analytics";
 import { useLookups } from "@/hooks/useLookups";
-import { deriveTitle, formatDate, formatCoords, getPriorityLabel, getPriorityStyle, getStatusStyle } from "@/lib/reportHelpers";
+import { deriveTitle, formatDate, formatCoords, getPriorityLabel, getPriorityStyle, getStatusStyle, isResolvedStatus } from "@/lib/reportHelpers";
 import { StatusTimeline } from "@/components/StatusTimeline";
 import { CommentsSection } from "@/components/CommentsSection";
+import { RatingModal } from "@/components/RatingModal";
 import { useRole } from "@/context/RoleContext";
 import { useToast } from "@/hooks/use-toast";
 
@@ -21,9 +24,11 @@ export default function ComplaintDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { categoryLabel, statusLabel } = useLookups();
-  const { role } = useRole();
+  const { role, userId } = useRole();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [isRatingModalOpen, setIsRatingModalOpen] = useState(false);
+
   const canEditPriority = role === "officer" || role === "admin";
 
   const { data: report, isLoading, error } = useQuery({
@@ -32,6 +37,17 @@ export default function ComplaintDetailPage() {
     enabled: !!id,
     refetchInterval: (query) => (query.state.data?.category_id == null ? 2000 : false),
     refetchIntervalInBackground: true,
+  });
+
+  const { data: rating } = useQuery({
+    queryKey: ["rating", id],
+    queryFn: () => fetchRating(id as string),
+    enabled: !!id,
+  });
+
+  const { data: categoryRatings } = useQuery({
+    queryKey: ["categoryRatings"],
+    queryFn: fetchCategoryRatings,
   });
 
   const priorityMutation = useMutation({
@@ -57,7 +73,7 @@ export default function ComplaintDetailPage() {
 
   if (isLoading) {
     return (
-      <AppLayout>
+      
         <div className="space-y-6">
           <Skeleton className="h-10 w-32" />
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -69,18 +85,18 @@ export default function ComplaintDetailPage() {
             </div>
           </div>
         </div>
-      </AppLayout>
+      
     );
   }
 
   if (error || !report) {
     return (
-      <AppLayout>
+      
         <div className="text-center py-12">
           <p className="text-destructive font-semibold">Грешка при вчитување на пријавата.</p>
           <Button variant="outline" className="mt-4" onClick={() => navigate(-1)}>Назад</Button>
         </div>
-      </AppLayout>
+      
     );
   }
 
@@ -92,10 +108,15 @@ export default function ComplaintDetailPage() {
       created_at: h.created_at,
     }));
 
+  const isResolved = isResolvedStatus(statusLabel(report.status_id));
+  const isOwner = report.user_id === userId;
+  const canRate = isResolved && isOwner && !rating;
+
+  const avgCategoryRating = categoryRatings?.find((r) => r.category_id === report.category_id);
+
   return (
-    <AppLayout>
       <div className="space-y-6">
-        <Button variant="ghost" className="pl-0 hover:bg-transparent" onClick={() => navigate(-1)}>
+        <Button variant="ghost" className="pl-0 hover:bg-transparent" onClick={() => navigate(-1)} aria-label="Врати се назад">
           <ChevronLeft className="mr-2 h-4 w-4" /> Назад
         </Button>
 
@@ -121,18 +142,31 @@ export default function ComplaintDetailPage() {
                   <h4 className="font-semibold mb-2">Опис</h4>
                   <p className="text-foreground whitespace-pre-wrap">{report.description}</p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Tag className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-medium">Категорија:</span>
-                  <Badge variant="secondary">{categoryLabel(report.category_id)}</Badge>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="flex items-center gap-2">
+                    <Tag className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-medium">Категорија:</span>
+                    <Badge variant="secondary">{categoryLabel(report.category_id)}</Badge>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-medium">Приоритет:</span>
+                    <Badge variant="outline" className={getPriorityStyle(report.priority)}>
+                      {getPriorityLabel(report.priority)}
+                    </Badge>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-medium">Приоритет:</span>
-                  <Badge variant="outline" className={getPriorityStyle(report.priority)}>
-                    {getPriorityLabel(report.priority)}
-                  </Badge>
-                </div>
+
+                {avgCategoryRating && (
+                  <div className="flex items-center gap-2 pt-2 border-t mt-4">
+                    <Star className="h-4 w-4 text-yellow-500 fill-yellow-500" />
+                    <span className="text-sm font-medium">Просечна оцена за оваа категорија:</span>
+                    <span className="text-sm font-bold">{avgCategoryRating.average_stars.toFixed(1)}</span>
+                    <span className="text-xs text-muted-foreground">({avgCategoryRating.ratings_count} оцени)</span>
+                  </div>
+                )}
+
                 {report.possible_duplicate_of != null && (
                   <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-100">
                     Оваа пријава е означена како можен дупликат на пријава #{report.possible_duplicate_of}.
@@ -150,7 +184,7 @@ export default function ComplaintDetailPage() {
                       }}
                       disabled={priorityMutation.isPending}
                     >
-                      <SelectTrigger className="max-w-[220px]">
+                      <SelectTrigger className="max-w-[220px]" aria-label="Промени приоритет">
                         <SelectValue placeholder="Избери приоритет" />
                       </SelectTrigger>
                       <SelectContent>
@@ -163,6 +197,47 @@ export default function ComplaintDetailPage() {
                 )}
               </CardContent>
             </Card>
+
+            {/* Rating Section */}
+            {isResolved && (
+              <Card className={rating ? "border-success/50 bg-success/5" : "border-primary/50 bg-primary/5"}>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Star className={`h-5 w-5 ${rating ? "text-yellow-500 fill-yellow-500" : "text-primary"}`} />
+                    {rating ? "Вашата оцена" : "Оценете го решавањето"}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {rating ? (
+                    <div className="space-y-3">
+                      <div className="flex gap-1">
+                        {[1, 2, 3, 4, 5].map((s) => (
+                          <Star key={s} className={`h-6 w-6 ${rating.stars >= s ? "fill-yellow-400 text-yellow-400" : "text-muted"}`} />
+                        ))}
+                      </div>
+                      {rating.comment && (
+                        <div className="bg-background/50 p-3 rounded-md border text-sm italic">
+                          <MessageCircle className="h-4 w-4 inline mr-2 text-muted-foreground" />
+                          "{rating.comment}"
+                        </div>
+                      )}
+                      <p className="text-xs text-muted-foreground">Оценето на {formatDate(rating.created_at)}</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                      <p className="text-sm text-muted-foreground max-w-md">
+                        Оваа пријава е означена како решена. Вашата оцена ни помага да ги подобриме услугите за сите граѓани.
+                      </p>
+                      {canRate ? (
+                        <Button onClick={() => setIsRatingModalOpen(true)} aria-label="Оцени ја пријавата">Оцени сега</Button>
+                      ) : (
+                        !isOwner && <p className="text-xs italic text-muted-foreground">Само подносителот може да ја оцени пријавата.</p>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           <div className="space-y-6">
@@ -184,7 +259,12 @@ export default function ComplaintDetailPage() {
             </Card>
           </div>
         </div>
+
+      <RatingModal
+        reportId={report.id}
+        isOpen={isRatingModalOpen}
+        onClose={() => setIsRatingModalOpen(false)}
+      />
       </div>
-    </AppLayout>
   );
 }

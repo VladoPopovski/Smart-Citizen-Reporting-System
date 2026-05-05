@@ -1,4 +1,3 @@
-import { AppLayout } from "@/components/AppLayout";
 import { useRole } from "@/context/RoleContext";
 import { FileText, CheckCircle, ArrowRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -10,7 +9,6 @@ export default function HomePage() {
   const navigate = useNavigate();
 
   return (
-    <AppLayout>
       <div className="max-w-3xl mx-auto space-y-8">
         <div className="space-y-3 pt-4">
           <h1 className="text-3xl font-extrabold text-foreground">
@@ -46,6 +44,5 @@ export default function HomePage() {
           </Card>
         </div>
       </div>
-    </AppLayout>
   );
 }

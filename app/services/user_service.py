@@ -39,3 +39,18 @@ def upsert_user(
         db.refresh(user)
 
     return user
+
+
+def update_user_settings(
+    db: Session,
+    *,
+    user_id: UUID,
+    email_notifications: bool,
+) -> User:
+    user = db.get(User, user_id)
+    if user is None:
+        raise ValueError("User not found")
+    user.email_notifications = email_notifications
+    db.commit()
+    db.refresh(user)
+    return user

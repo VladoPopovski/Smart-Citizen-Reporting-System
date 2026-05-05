@@ -45,7 +45,15 @@ def get_current_user_logic(
         )
 
     email = payload.get("email")
-    raw_role = payload.get("app_role") or payload.get("role") or UserRole.citizen.value
+    user_metadata = payload.get("user_metadata") or {}
+    app_metadata = payload.get("app_metadata") or {}
+    raw_role = (
+        payload.get("app_role")
+        or app_metadata.get("app_role")
+        or user_metadata.get("app_role")
+        or user_metadata.get("role")
+        or UserRole.citizen.value
+    )
     try:
         role = UserRole(str(raw_role))
     except Exception:
@@ -73,7 +81,6 @@ def get_current_user_logic(
         },
     )
 
-    # ✅ BE2: Upsert — создај корисник во DB ако не постои
     user_service.upsert_user(db, user_id=user_id, email=email, role=role)
 
     return CurrentUser(id=user_id, email=email, role=role)

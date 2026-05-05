@@ -52,13 +52,13 @@ export function CommentsSection({ reportId, comments }: Props) {
       {comments.length === 0 ? (
         <p className="text-sm text-muted-foreground italic">Сè уште нема коментари.</p>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-4" aria-live="polite" aria-label="Листа на коментари">
           {comments.map((c) => (
-            <div key={c.id} className="rounded-lg border bg-muted/20 p-4 space-y-1 shadow-sm">
+            <div key={c.id} className="rounded-lg border bg-muted/20 p-4 space-y-1 shadow-sm" role="article">
               <p className="text-sm text-foreground whitespace-pre-wrap">{c.content}</p>
               <div className="flex justify-between items-center text-[10px] text-muted-foreground">
-                <span>Корисник: {c.user_id.slice(0, 8)}...</span>
-                <span>{formatDate(c.created_at)}</span>
+                <span aria-label="Идентификатор на корисник">Корисник: {c.user_id.slice(0, 8)}...</span>
+                <span aria-label="Датум на коментар">{formatDate(c.created_at)}</span>
               </div>
             </div>
           ))}
@@ -73,12 +73,14 @@ export function CommentsSection({ reportId, comments }: Props) {
             onChange={(e) => setText(e.target.value)}
             rows={3}
             disabled={mutation.isPending}
+            aria-label="Внесете официјален коментар"
           />
           <div className="flex justify-end">
             <Button 
               size="sm" 
               onClick={handleSubmit} 
               disabled={!text.trim() || mutation.isPending}
+              aria-label="Додади коментар"
             >
               {mutation.isPending && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
               Додади коментар

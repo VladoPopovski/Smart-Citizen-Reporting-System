@@ -51,7 +51,7 @@ export function AppSidebar() {
     adminNav;
 
   return (
-    <Sidebar collapsible="none">
+    <Sidebar collapsible="offcanvas">
       <SidebarContent>
         <div className="px-3 py-4">
           <p className="px-3 mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">

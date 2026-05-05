@@ -25,7 +25,7 @@ export function Navbar() {
   return (
     <header className="h-16 border-b bg-card flex items-center justify-between px-4 md:px-6 sticky top-0 z-50">
       <div className="flex items-center gap-2">
-        <SidebarTrigger className="md:hidden" />
+        <SidebarTrigger />
         <img src={logo} className="h-10 md:h-14 w-auto" alt="UrbanCare Logo" />
       </div>
 

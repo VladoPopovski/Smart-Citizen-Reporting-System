@@ -14,7 +14,6 @@ from app.schemas.rating import CategoryRatingAvg
 from app.schemas.user import CurrentUser, UserRole
 from app.services import rating_service
 from app.utils.dependencies import require_roles
-from app.utils.report_statuses import status_ids_for_names
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -116,7 +115,7 @@ def _add_months(dt: datetime, months: int) -> datetime:
 @router.get("/ratings", response_model=list[CategoryRatingAvg])
 def get_category_ratings(
         db: Session = Depends(get_db),
-        current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin)),
+        current_user: CurrentUser = Depends(require_roles(UserRole.admin)),
 ) -> list[CategoryRatingAvg]:
     """Average citizen rating per category (CR-06).
 
@@ -130,10 +129,10 @@ def get_category_ratings(
 @router.get("/summary")
 def get_analytics_summary(
         db: Session = Depends(get_db),
-        current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin)),
+        current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin))
 ):
-    resolved_status_ids = status_ids_for_names(db, RESOLVED_STATUS_NAMES)
-    active_status_ids = status_ids_for_names(db, ACTIVE_STATUS_NAMES)
+    resolved_status_ids = _status_ids_for_names(db, RESOLVED_STATUS_NAMES)
+    active_status_ids = _status_ids_for_names(db, ACTIVE_STATUS_NAMES)
 
     # KPI Cards
     total_reports = _count_reports(db)
@@ -190,10 +189,10 @@ def get_analytics_summary(
         {"name": "Активни", "value": active_reports},
     ]
 
-    # LineChart: Monthly trend (last 6 months)
+    # LineChart: Monthly trend (last 2 months)
     monthly_data = []
     current_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    for i in range(5, -1, -1):
+    for i in range(1, -1, -1):
         month_start = _add_months(current_month, -i)
         month_end = _add_months(month_start, 1)
         month_name = month_start.strftime("%b")
@@ -235,15 +234,15 @@ def get_analytics_summary(
 @router.get("/export/csv")
 def export_csv(
         db: Session = Depends(get_db),
-        current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin)),
+        current_user: CurrentUser = Depends(require_roles(UserRole.admin))
 ):
     reports = db.scalars(
         select(Report).options(selectinload(Report.category), selectinload(Report.status))
     ).all()
 
     output = io.StringIO()
-    output.write("\ufeff")  # UTF-8 BOM for Excel/Cyrillic support
-    writer = csv.writer(output, delimiter=';', lineterminator='\r\n', quoting=csv.QUOTE_MINIMAL)
+    output.write("﻿")  # UTF-8 BOM for Excel/Cyrillic support
+    writer = csv.writer(output)
 
     writer.writerow(["#", "Опис", "Категорија", "Статус", "Приоритет", "Датум на пријава"])
 
@@ -272,8 +271,8 @@ def export_pdf(
         db: Session = Depends(get_db),
         current_user: CurrentUser = Depends(require_roles(UserRole.admin))
 ):
-    resolved_status_ids = status_ids_for_names(db, RESOLVED_STATUS_NAMES)
-    active_status_ids = status_ids_for_names(db, ACTIVE_STATUS_NAMES)
+    resolved_status_ids = _status_ids_for_names(db, RESOLVED_STATUS_NAMES)
+    active_status_ids = _status_ids_for_names(db, ACTIVE_STATUS_NAMES)
 
     total = _count_reports(db)
     resolved = _count_reports(db, _status_filter(resolved_status_ids))
@@ -291,7 +290,7 @@ def export_pdf(
 
     current_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     monthly_rows = []
-    for i in range(5, -1, -1):
+    for i in range(1, -1, -1):
         month_start = _add_months(current_month, -i)
         month_end = _add_months(month_start, 1)
         count = _count_reports(db, Report.created_at >= month_start, Report.created_at < month_end)

@@ -28,9 +28,10 @@ export default function AnalyticsPage() {
   const { data: ratingData, isLoading: isRatingsLoading } = useQuery({
     queryKey: ["analytics", "ratings"],
     queryFn: fetchCategoryRatings,
+    enabled: role === "admin",
   });
 
-  const isLoading = isSummaryLoading || isRatingsLoading;
+  const isLoading = isSummaryLoading || (role === "admin" && isRatingsLoading);
   const error = summaryError;
 
   const handleExportCsv = async () => {
@@ -59,7 +60,7 @@ export default function AnalyticsPage() {
 
   if (isLoading) {
     return (
-      
+
         <div className="space-y-6">
           <div className="flex justify-between items-end">
             <div className="space-y-2">
@@ -81,18 +82,18 @@ export default function AnalyticsPage() {
             <Skeleton className="h-[350px]" />
           </div>
         </div>
-      
+
     );
   }
 
   if (error || !data) {
     return (
-      
+
         <div className="text-center py-12 text-destructive">
           <p className="font-semibold">Грешка при вчитување на аналитиката.</p>
           <Button variant="outline" className="mt-4" onClick={() => window.location.reload()}>Обиди се повторно</Button>
         </div>
-      
+
     );
   }
 
@@ -196,28 +197,30 @@ export default function AnalyticsPage() {
           </Card>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Месечен тренд</CardTitle>
-            <p className="text-xs text-muted-foreground">Споредба меѓу пристигнати, активни и решени пријави</p>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={250}>
-              <LineChart data={data.monthlyData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(220, 13%, 91%)" />
-                <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="complaints" name="Пријави" stroke="hsl(217, 91%, 60%)" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="resolved" name="Решени" stroke="hsl(142, 71%, 45%)" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="active" name="Активни" stroke="hsl(38, 92%, 50%)" strokeWidth={2} dot={{ r: 3 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
+        {role === "admin" && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Месечен тренд</CardTitle>
+              <p className="text-xs text-muted-foreground">Споредба меѓу пристигнати, активни и решени пријави</p>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={250}>
+                <LineChart data={data.monthlyData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(220, 13%, 91%)" />
+                  <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="complaints" name="Пријави" stroke="hsl(217, 91%, 60%)" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="resolved" name="Решени" stroke="hsl(142, 71%, 45%)" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="active" name="Активни" stroke="hsl(38, 92%, 50%)" strokeWidth={2} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
 
-        {ratingData && ratingData.length > 0 && (
+        {role === "admin" && ratingData && ratingData.length > 0 && (
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">

@@ -1,4 +1,3 @@
-
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,9 +8,10 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchReports, updateReportPriority, updateReportStatus, updateReportCategory, type PriorityValue } from "@/services/reports";
 import { useLookups } from "@/hooks/useLookups";
-import { formatDate, formatCoords, deriveTitle, getStatusStyle, isActiveStatus, getPriorityLabel, getPriorityStyle, getCategoryMacedonianName } from "@/lib/reportHelpers";
+import { formatDate, formatCoords, deriveTitle, getStatusStyle, isActiveStatus, isAdminOfficerStatusOption, getPriorityLabel, getPriorityStyle, getCategoryMacedonianName } from "@/lib/reportHelpers";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useRole } from "@/context/RoleContext";
 
 const PRIORITY_OPTIONS: PriorityValue[] = ["Низок", "Среден", "Висок", "Итен"];
 
@@ -20,6 +20,10 @@ export default function AssignedComplaintsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { categoryLabel, statusLabel, statuses, categories } = useLookups();
+  const { role } = useRole();
+  const statusOptions = (role === "officer" || role === "admin")
+    ? statuses.filter((s) => isAdminOfficerStatusOption(s.name))
+    : statuses;
   const [statusFilter, setStatusFilter] = useState("all");
 
   const { data: reports = [], isLoading } = useQuery({
@@ -170,7 +174,7 @@ export default function AssignedComplaintsPage() {
                       <SelectValue placeholder="Статус" />
                     </SelectTrigger>
                     <SelectContent>
-                      {statuses.map((s) => (
+                      {statusOptions.map((s) => (
                         <SelectItem key={s.id} value={s.id.toString()}>
                           {s.name}
                         </SelectItem>

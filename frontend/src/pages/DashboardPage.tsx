@@ -3,11 +3,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FileText, Clock, CheckCircle, AlertTriangle, ClipboardList } from "lucide-react";
 import { useRole } from "@/context/RoleContext";
+import { isActiveStatus, isAdminOfficerStatusOption, isResolvedStatus } from "@/lib/reportHelpers";
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchReports, updateReportStatus, updateReportCategory } from "@/services/reports";
 import { useLookups } from "@/hooks/useLookups";
-import { formatDate, deriveTitle, getPriorityLabel, getPriorityStyle, getStatusStyle, getCategoryMacedonianName, isActiveStatus, isResolvedStatus } from "@/lib/reportHelpers";
+import { formatDate, deriveTitle, getPriorityLabel, getPriorityStyle, getStatusStyle, getCategoryMacedonianName } from "@/lib/reportHelpers";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -23,6 +24,9 @@ export default function DashboardPage() {
     queryFn: fetchReports,
   });
   const { statusLabel, categoryLabel, statuses, categories } = useLookups();
+  const statusOptions = (role === "officer" || role === "admin")
+    ? statuses.filter((s) => isAdminOfficerStatusOption(s.name))
+    : statuses;
 
   const statusMutation = useMutation({
     mutationFn: ({ reportId, status_id }: { reportId: string; status_id: number }) =>
@@ -190,7 +194,7 @@ export default function DashboardPage() {
                               <SelectValue placeholder="Избери статус" />
                             </SelectTrigger>
                             <SelectContent>
-                              {statuses.map((s) => (
+                              {statusOptions.map((s) => (
                                 <SelectItem key={s.id} value={s.id.toString()}>
                                   {s.name}
                                 </SelectItem>

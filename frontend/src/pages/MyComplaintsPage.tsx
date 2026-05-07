@@ -11,11 +11,12 @@ import { Search, Plus, MapPin, Calendar } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { fetchReports } from "@/services/reports";
 import { useLookups } from "@/hooks/useLookups";
-import { deriveTitle, formatDate, formatCoords, getPriorityLabel, getPriorityStyle, getStatusStyle, getCategoryMacedonianName } from "@/lib/reportHelpers";
+import { deriveTitle, formatDate, formatCoords, getPriorityLabel, getPriorityStyle, getStatusStyle, getCategoryMacedonianName, isAdminOfficerStatusOption } from "@/lib/reportHelpers";
 
 export default function MyComplaintsPage() {
   const navigate = useNavigate();
   const { categories, statuses, categoryLabel, statusLabel } = useLookups();
+  const statusOptions = statuses.filter((s) => isAdminOfficerStatusOption(s.name));
 
   const { data: reports = [], isLoading, error, refetch } = useQuery({
     queryKey: ["reports"],
@@ -56,7 +57,7 @@ export default function MyComplaintsPage() {
             <SelectTrigger className="w-40"><SelectValue placeholder="Статус" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Сите статуси</SelectItem>
-              {statuses.map((s) => (
+              {statusOptions.map((s) => (
                 <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
               ))}
             </SelectContent>

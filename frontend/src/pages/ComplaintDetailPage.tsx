@@ -169,7 +169,7 @@ export default function ComplaintDetailPage() {
 
                 {report.possible_duplicate_of != null && (
                   <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-100">
-                    Оваа пријава е означена како можен дупликат на пријава #{report.possible_duplicate_of}.
+                    Оваа пријава е означена како можен дупликат на пријава: "{report.possible_duplicate_of_report?.description ?? report.possible_duplicate_of}".
                   </div>
                 )}
                 {canEditPriority && (
@@ -199,7 +199,7 @@ export default function ComplaintDetailPage() {
             </Card>
 
             {/* Rating Section */}
-            {isResolved && (
+            {isResolved && isOwner && (
               <Card className={rating ? "border-success/50 bg-success/5" : "border-primary/50 bg-primary/5"}>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg flex items-center gap-2">
@@ -231,7 +231,7 @@ export default function ComplaintDetailPage() {
                       {canRate ? (
                         <Button onClick={() => setIsRatingModalOpen(true)} aria-label="Оцени ја пријавата">Оцени сега</Button>
                       ) : (
-                        !isOwner && <p className="text-xs italic text-muted-foreground">Само подносителот може да ја оцени пријавата.</p>
+                        <p className="text-xs italic text-muted-foreground">За да ја оцените пријавата, мора да сте подносителот.</p>
                       )}
                     </div>
                   )}

@@ -14,6 +14,7 @@ export interface CommentRead {
   user_id: string;
   content: string;
   created_at: string;
+  user_email?: string;
 }
 
 export interface ReportRead {
@@ -25,10 +26,11 @@ export interface ReportRead {
   category_id: number | null;
   status_id: number | null;
   user_id: string;
-  user_email?: string; // Added user_email
+  user_email?: string;
   created_at: string;
   ai_confirmation_text?: string | null;
   possible_duplicate_of?: string | null;
+  possible_duplicate_of_report?: { id: string; description: string } | null;
   history_entries: HistoryRead[];
   comments: CommentRead[];
 }
@@ -186,10 +188,11 @@ function normalizeReport(row: any): ReportRead {
     category_id: row.category_id ?? null,
     status_id: row.status_id ?? null,
     user_id: row.user_id,
-    user_email: row.users?.email ?? undefined, // Added user_email
+    user_email: row.users?.email ?? undefined,
     created_at: row.created_at,
     ai_confirmation_text: row.ai_confirmation_text ?? null,
     possible_duplicate_of: row.possible_duplicate_of ?? null,
+    possible_duplicate_of_report: null,
     history_entries: [],
     comments: [],
   };
@@ -239,6 +242,27 @@ export async function fetchReportById(id: string): Promise<ReportRead> {
   const report = normalizeReport(data);
   report.comments = await fetchReportComments(id);
   report.history_entries = await fetchReportHistory(id);
+
+  if (report.possible_duplicate_of) {
+    try {
+      const { data: dup, error: dupError } = await supabase
+        .from("reports")
+        .select("id, description")
+        .eq("id", report.possible_duplicate_of)
+        .single();
+
+      if (!dupError && dup) {
+        report.possible_duplicate_of_report = { id: dup.id, description: dup.description };
+      } else {
+        report.possible_duplicate_of_report = null;
+      }
+    } catch {
+      report.possible_duplicate_of_report = null;
+    }
+  } else {
+    report.possible_duplicate_of_report = null;
+  }
+
   return report;
 }
 
@@ -296,14 +320,21 @@ export async function addComment(reportId: string, content: string): Promise<Com
   const { data, error } = await supabase
     .from("comments")
     .insert({ report_id: reportId, content, user_id: userId })
-    .select("id, user_id, content, created_at")
+    .select("id, user_id, content, created_at, users: user_id (email)")
     .single();
 
   if (error) {
     throw new Error(error.message || "Failed to add comment.");
   }
 
-  return data;
+  const row = data as any;
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    content: row.content,
+    created_at: row.created_at,
+    user_email: row.users?.email ?? undefined,
+  };
 }
 
 export async function updateReport(reportId: string, patch: Partial<Pick<ReportRead, "description" | "latitude" | "longitude" | "category_id" | "status_id" | "priority">>): Promise<ReportRead> {
@@ -338,7 +369,7 @@ export function updateReportCategory(reportId: string, category_id: number): Pro
 export async function fetchReportComments(reportId: string): Promise<CommentRead[]> {
   const { data, error } = await supabase
     .from("comments")
-    .select("id, user_id, content, created_at")
+    .select("id, user_id, content, created_at, users: user_id (email)")
     .eq("report_id", reportId)
     .order("created_at", { ascending: true });
 
@@ -347,7 +378,14 @@ export async function fetchReportComments(reportId: string): Promise<CommentRead
     throw new Error(error.message || "Failed to fetch comments.");
   }
 
-  return data ?? [];
+  const rows = (data ?? []) as any[];
+  return rows.map((r) => ({
+    id: r.id,
+    user_id: r.user_id,
+    content: r.content,
+    created_at: r.created_at,
+    user_email: r.users?.email ?? undefined,
+  }));
 }
 
 export async function fetchReportHistory(reportId: string): Promise<HistoryRead[]> {

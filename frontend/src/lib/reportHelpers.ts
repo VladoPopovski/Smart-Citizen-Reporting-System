@@ -101,6 +101,16 @@ const RESOLVED_STATUS_NAMES = new Set([
   "затворени",
 ]);
 
+const ADMIN_OFFICER_STATUS_OPTION_NAMES = new Set([
+  "aktiven",
+  "активен",
+  "Ð°ÐºÑ‚Ð¸Ð²ÐµÐ½",
+  "resen",
+  "reshen",
+  "решен",
+  "Ñ€ÐµÑˆÐµÐ½",
+]);
+
 function normalizeStatusName(status: string): string {
   return status.trim().toLowerCase().replace(/[_-]/g, " ").replace(/\s+/g, " ");
 }
@@ -111,4 +121,8 @@ export function isActiveStatus(status: string): boolean {
 
 export function isResolvedStatus(status: string): boolean {
   return RESOLVED_STATUS_NAMES.has(normalizeStatusName(status));
+}
+
+export function isAdminOfficerStatusOption(status: string): boolean {
+  return ADMIN_OFFICER_STATUS_OPTION_NAMES.has(normalizeStatusName(status));
 }

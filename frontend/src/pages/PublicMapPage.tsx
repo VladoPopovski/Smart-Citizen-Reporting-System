@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Map as MapIcon, Filter, Loader2, Plus } from "lucide-react";
+import { useRole } from "@/context/RoleContext";
 
 // Fix default marker icon
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
@@ -25,13 +26,18 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
-// Custom colored markers for statuses
-const getMarkerIcon = (statusId: number | null) => {
-  let color = "#3b82f6"; // blue (default/new)
-  if (statusId === 2) color = "#eab308"; // warning (in progress)
-  if (statusId === 3) color = "#22c55e"; // success (resolved)
-  if (statusId === 4) color = "#ef4444"; // destructive (rejected)
-  
+const getMarkerColorForPriority = (priority: string | null | undefined) => {
+  if (!priority) return "#64748b";
+  const p = priority.trim().toLowerCase();
+  if (p.includes("итен") || p.includes("urgent") || p.includes("critical")) return "#ef4444"; // red
+  if (p.includes("висок") || p.includes("high")) return "#eab308"; // amber
+  if (p.includes("среден") || p.includes("medium") || p.includes("normal")) return "#3b82f6"; // blue
+  if (p.includes("низок") || p.includes("low")) return "#22c55e"; // green
+  return "#64748b";
+};
+
+const getMarkerIconByPriority = (priority: string | null | undefined) => {
+  const color = getMarkerColorForPriority(priority);
   return new L.DivIcon({
     className: "custom-div-icon",
     html: `<div style="background-color: ${color}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3);"></div>`,
@@ -42,7 +48,12 @@ const getMarkerIcon = (statusId: number | null) => {
 
 export default function PublicMapPage() {
   const navigate = useNavigate();
+  const { role } = useRole();
   const { categories, statuses, categoryLabel, statusLabel } = useLookups();
+  const statusOptions = statuses.filter((s) => {
+    const n = s.name.trim().toLowerCase();
+    return n.includes("активен") || n.includes("решен");
+  });
   const [statusFilter, setStatusFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
 
@@ -75,7 +86,7 @@ export default function PublicMapPage() {
                 <SelectTrigger className="w-[140px] h-9 text-xs"><SelectValue placeholder="Статус" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Сите статуси</SelectItem>
-                  {statuses.map((s) => (
+                  {statusOptions.map((s) => (
                     <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -109,11 +120,15 @@ export default function PublicMapPage() {
                 </div>
                 <div className="space-y-1">
                   <p className="font-medium text-foreground">Не се пронајдени пријави на мапата.</p>
-                  <p className="text-xs text-muted-foreground">Пробајте да ги промените филтрите или бидете првиот што ќе поднесе нов проблем.</p>
+                  <p className="text-xs text-muted-foreground">
+                    Пробајте да ги промените филтрите{role === "citizen" && ' или бидете првиот што ќе поднесе нов проблем.'}
+                  </p>
                 </div>
-                <Button size="sm" onClick={() => navigate("/new-complaint")} className="w-full">
-                   <Plus className="mr-2 h-4 w-4" /> Пријави проблем
-                </Button>
+                {role === "citizen" && (
+                  <Button size="sm" onClick={() => navigate("/new-complaint")} className="w-full">
+                    <Plus className="mr-2 h-4 w-4" /> Пријави проблем
+                  </Button>
+                )}
               </div>
             </div>
           )}
@@ -127,7 +142,7 @@ export default function PublicMapPage() {
               <Marker 
                 key={r.id} 
                 position={[r.latitude!, r.longitude!]} 
-                icon={getMarkerIcon(r.status_id)}
+                icon={getMarkerIconByPriority(r.priority)}
                 aria-label={`Локација: ${deriveTitle(r.description)}`}
               >
                 <Popup className="custom-popup">
@@ -160,10 +175,11 @@ export default function PublicMapPage() {
           </MapContainer>
           
           <div className="absolute bottom-4 left-4 bg-background/90 backdrop-blur-sm p-3 rounded-lg border border-border shadow-lg z-[1000] text-xs space-y-2">
-            <p className="font-semibold border-bottom pb-1 mb-1">Легенда:</p>
-
-            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-blue-500 border border-white" /> Активен</div>
-            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-yellow-500 border border-white" /> Решен</div>
+            <p className="font-semibold border-bottom pb-1 mb-1">Легенда(Приоритет):</p>
+            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#ef4444', border: '1px solid white' }} /> Итен</div>
+            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#eab308', border: '1px solid white' }} /> Висок</div>
+            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#3b82f6', border: '1px solid white' }} /> Среден</div>
+            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#22c55e', border: '1px solid white' }} /> Низок</div>
           </div>
         </div>
       </div>

@@ -8,7 +8,8 @@ import { Search, Eye, FileText, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { fetchReports, updateReportPriority, updateReportStatus, type PriorityValue } from "@/services/reports";
 import { useLookups } from "@/hooks/useLookups";
-import { deriveTitle, formatDate, getPriorityLabel, getPriorityStyle, getStatusStyle, getCategoryMacedonianName } from "@/lib/reportHelpers";
+import { deriveTitle, formatDate, getPriorityLabel, getPriorityStyle, getStatusStyle, getCategoryMacedonianName, isAdminOfficerStatusOption } from "@/lib/reportHelpers";
+import { useRole } from "@/context/RoleContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -20,6 +21,10 @@ export default function ManageComplaintsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { categoryLabel, statusLabel, statuses } = useLookups();
+  const { role } = useRole();
+  const statusOptions = (role === "officer" || role === "admin")
+    ? statuses.filter((s) => isAdminOfficerStatusOption(s.name))
+    : statuses;
   const [search, setSearch] = useState("");
 
   const { data: reports = [], isLoading } = useQuery({
@@ -137,7 +142,7 @@ export default function ManageComplaintsPage() {
                             <SelectValue placeholder="Статус" />
                           </SelectTrigger>
                           <SelectContent>
-                            {statuses.map((s) => (
+                            {statusOptions.map((s) => (
                               <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>
                             ))}
                           </SelectContent>

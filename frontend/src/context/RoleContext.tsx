@@ -14,7 +14,7 @@ interface RoleContextType {
   userId: string | null;
   isLoggedIn: boolean;
   isAuthLoading: boolean;
-  login: (email: string, password: string, selectedRole: UserRole) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, role: UserRole) => Promise<{ emailConfirmationRequired: boolean }>;
   logout: () => Promise<void>;
 }
@@ -128,8 +128,8 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const login = async (email: string, password: string, selectedRole: UserRole) => {
-    setRoleOverride(selectedRole);
+  const login = async (email: string, password: string) => {
+    clearRoleOverride();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
       clearRoleOverride();
@@ -138,6 +138,8 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   };
 
   const register = async (email: string, password: string, selectedRole: UserRole) => {
+    setRoleOverride(selectedRole);
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -146,7 +148,10 @@ export function RoleProvider({ children }: { children: ReactNode }) {
       },
     });
 
-    if (error) throw error;
+    if (error) {
+      clearRoleOverride();
+      throw error;
+    }
 
     return {
       emailConfirmationRequired: !data.session,

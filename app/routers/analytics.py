@@ -14,6 +14,7 @@ from app.schemas.rating import CategoryRatingAvg
 from app.schemas.user import CurrentUser, UserRole
 from app.services import rating_service
 from app.utils.dependencies import require_roles
+from app.utils.report_statuses import status_ids_for_names
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -129,10 +130,10 @@ def get_category_ratings(
 @router.get("/summary")
 def get_analytics_summary(
         db: Session = Depends(get_db),
-        current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin))
+        current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin)),
 ):
-    resolved_status_ids = _status_ids_for_names(db, RESOLVED_STATUS_NAMES)
-    active_status_ids = _status_ids_for_names(db, ACTIVE_STATUS_NAMES)
+    resolved_status_ids = status_ids_for_names(db, RESOLVED_STATUS_NAMES)
+    active_status_ids = status_ids_for_names(db, ACTIVE_STATUS_NAMES)
 
     # KPI Cards
     total_reports = _count_reports(db)
@@ -234,15 +235,15 @@ def get_analytics_summary(
 @router.get("/export/csv")
 def export_csv(
         db: Session = Depends(get_db),
-        current_user: CurrentUser = Depends(require_roles(UserRole.admin))
+        current_user: CurrentUser = Depends(require_roles(UserRole.officer, UserRole.admin)),
 ):
     reports = db.scalars(
         select(Report).options(selectinload(Report.category), selectinload(Report.status))
     ).all()
 
     output = io.StringIO()
-    output.write("﻿")  # UTF-8 BOM for Excel/Cyrillic support
-    writer = csv.writer(output)
+    output.write("\ufeff")  # UTF-8 BOM for Excel/Cyrillic support
+    writer = csv.writer(output, delimiter=';', lineterminator='\r\n', quoting=csv.QUOTE_MINIMAL)
 
     writer.writerow(["#", "Опис", "Категорија", "Статус", "Приоритет", "Датум на пријава"])
 
@@ -271,8 +272,8 @@ def export_pdf(
         db: Session = Depends(get_db),
         current_user: CurrentUser = Depends(require_roles(UserRole.admin))
 ):
-    resolved_status_ids = _status_ids_for_names(db, RESOLVED_STATUS_NAMES)
-    active_status_ids = _status_ids_for_names(db, ACTIVE_STATUS_NAMES)
+    resolved_status_ids = status_ids_for_names(db, RESOLVED_STATUS_NAMES)
+    active_status_ids = status_ids_for_names(db, ACTIVE_STATUS_NAMES)
 
     total = _count_reports(db)
     resolved = _count_reports(db, _status_filter(resolved_status_ids))

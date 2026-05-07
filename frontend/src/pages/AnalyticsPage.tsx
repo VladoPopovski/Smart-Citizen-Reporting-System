@@ -9,11 +9,13 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { fetchAnalyticsSummary, exportToCsv, exportToPdf, fetchCategoryRatings } from "@/services/analytics";
 import { useToast } from "@/hooks/use-toast";
 import { getCategoryMacedonianName } from "@/lib/reportHelpers";
+import { useRole } from "@/context/RoleContext";
 
 const COLORS = ["hsl(142, 71%, 45%)", "hsl(38, 92%, 50%)"];
 
 export default function AnalyticsPage() {
   const { toast } = useToast();
+  const { role } = useRole();
   const [exportingCsv, setExportingCsv] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [ratingSort, setRatingSort] = useState<"desc" | "asc">("desc");
@@ -113,14 +115,18 @@ export default function AnalyticsPage() {
             <p className="text-muted-foreground text-sm">Следете ги перформансите и задоволството на граѓаните во реално време.</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={handleExportCsv} disabled={exportingCsv} aria-label="Извези податоци во CSV формат">
-              {exportingCsv ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
-              Извези CSV
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={exportingPdf} aria-label="Извези податоци во PDF формат">
-              {exportingPdf ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-              Извези PDF
-            </Button>
+            {role === "admin" && (
+              <>
+                <Button variant="outline" size="sm" onClick={handleExportCsv} disabled={exportingCsv} aria-label="Извези податоци во CSV формат">
+                  {exportingCsv ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
+                  Извези CSV
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={exportingPdf} aria-label="Извези податоци во PDF формат">
+                  {exportingPdf ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                  Извези PDF
+                </Button>
+              </>
+            )}
           </div>
         </div>
 

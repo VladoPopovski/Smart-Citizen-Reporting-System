@@ -75,7 +75,7 @@ def list_reports(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> list[ReportRead]:
-    """Citizens see only their own. Officers and admins see all."""
+    """Citizens see their own, officers see active reports, admins see all."""
     return report_service.list_reports(db, current_user=current_user)
 
 
@@ -85,7 +85,7 @@ def get_report(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> ReportRead:
-    """Get a single report by ID. Citizens can only fetch their own."""
+    """Citizens fetch their own, officers fetch active reports, admins fetch all."""
     return report_service.get_report(db, report_id=report_id, current_user=current_user)
 
 
@@ -94,9 +94,9 @@ def update_report(
     report_id: UUID,
     report_in: ReportUpdate,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_roles(UserRole.citizen, UserRole.admin)),
 ) -> ReportRead:
-    """Citizens update their own only. Officers/admins update any."""
+    """Citizens update their own basic fields. Admins may update any report."""
     return report_service.update_report(db, report_id=report_id, report_in=report_in, current_user=current_user)
 
 
@@ -131,9 +131,9 @@ def update_report_priority(
 def delete_report(
     report_id: UUID,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_roles(UserRole.admin)),
 ) -> None:
-    """Delete a report. Citizens can only delete their own; admins can delete any."""
+    """Delete a report. Admins only."""
     report_service.delete_report(db, report_id=report_id, current_user=current_user)
 
 
@@ -224,7 +224,7 @@ async def upload_attachment(
 
 
 # ---------------------------------------------------------------------------
-# Export (FR-08) — officer/admin only
+# Export (FR-08) — admin only
 # ---------------------------------------------------------------------------
 
 _EXPORT_COLUMNS = [
@@ -263,10 +263,9 @@ def export_reports_csv(
     extractors = [extractor for _, extractor in _EXPORT_COLUMNS]
 
     def _iter_csv():
-        # UTF-8 BOM so Excel renders Cyrillic correctly.
         yield "﻿"
         buffer = StringIO()
-        writer = csv.writer(buffer)
+        writer = csv.writer(buffer, delimiter=';', lineterminator='\r\n', quoting=csv.QUOTE_MINIMAL)
         writer.writerow(headers)
         yield buffer.getvalue()
         buffer.seek(0)

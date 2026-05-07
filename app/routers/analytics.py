@@ -242,14 +242,12 @@ def export_csv(
 
     output = io.StringIO()
     output.write("﻿")  # UTF-8 BOM for Excel/Cyrillic support
-    writer = csv.writer(output, quoting=csv.QUOTE_ALL)
+    writer = csv.writer(output)
 
     writer.writerow(["#", "Опис", "Категорија", "Статус", "Приоритет", "Датум на пријава"])
 
     for i, r in enumerate(reports, start=1):
-        created = ""
-        if r.created_at:
-            created = r.created_at.strftime("%d.%m.%Y %H:%M")
+        created = r.created_at.strftime("%d.%m.%Y %H:%M") if r.created_at else "-"
         writer.writerow([
             i,
             r.description,

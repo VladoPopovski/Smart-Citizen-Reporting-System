@@ -30,7 +30,7 @@ from app.schemas.report import (
 from app.schemas.user import CurrentUser, UserRole
 from app.services.ai_service import assign_priority, classify_text, generate_confirmation_message, generate_confirmation_mk
 from app.utils.duplicate_detection import check_duplicate
-from app.utils.report_statuses import status_ids_for_names
+from app.utils.report_statuses import ACTIVE_STATUS_NAMES, status_ids_for_names
 
 logger = logging.getLogger(__name__)
 
@@ -71,14 +71,18 @@ def _to_report_read(report: Report) -> ReportRead:
             return None
 
     return ReportRead(
-        id=_safe(getattr(report, "id", None), int),
+        id=getattr(report, "id", None),
         description=_safe(getattr(report, "description", None)),
         category_id=_safe(getattr(report, "category_id", None), int),
         status_id=_safe(getattr(report, "status_id", None), int),
         user_id=getattr(report, "user_id", None),
         latitude=getattr(report, "latitude", None),
         longitude=getattr(report, "longitude", None),
+        priority=getattr(report, "priority", None),
+        possible_duplicate_of=getattr(report, "possible_duplicate_of", None),
+        ai_confirmation_text=getattr(report, "ai_confirmation_text", None),
         created_at=getattr(report, "created_at", datetime.now(timezone.utc)),
+        updated_at=getattr(report, "updated_at", datetime.now(timezone.utc)),
     )
 
 def create_report(db: Session, *, report_in: ReportCreate, current_user: CurrentUser) -> ReportRead:
@@ -273,7 +277,7 @@ def list_reports(db: Session, *, current_user: CurrentUser) -> list[ReportRead]:
         if current_user.role == UserRole.citizen:
             stmt = stmt.where(Report.user_id == current_user.id)
         elif current_user.role == UserRole.officer:
-            active_status_ids = status_ids_for_names(db, {"active"})
+            active_status_ids = status_ids_for_names(db, ACTIVE_STATUS_NAMES)
             if not active_status_ids:
                 return []
             stmt = stmt.where(Report.status_id.in_(active_status_ids))
@@ -307,11 +311,8 @@ def get_report(db: Session, *, report_id: UUID, current_user: CurrentUser) -> Re
     if current_user.role == UserRole.citizen and report.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not allowed")
     if current_user.role == UserRole.officer:
-        active_status_ids = status_ids_for_names(db, {"active"})
-        if not active_status_ids:
-            # No active statuses defined in DB — deny officer access to be conservative
-            raise HTTPException(status_code=403, detail="Not allowed")
-        if report.status_id not in active_status_ids:
+        active_status_ids = status_ids_for_names(db, ACTIVE_STATUS_NAMES)
+        if not active_status_ids or report.status_id not in active_status_ids:
             raise HTTPException(status_code=403, detail="Not allowed")
     return _to_report_read(report)
 

@@ -79,11 +79,10 @@ export default function AssignedComplaintsPage() {
     },
   });
 
-  const assigned = reports.filter((r) => isActiveStatus(statusLabel(r.status_id)));
   const filtered =
     statusFilter === "all"
-      ? assigned
-      : assigned.filter((r) => statusLabel(r.status_id) === statusFilter);
+      ? reports
+      : reports.filter((r) => statusLabel(r.status_id) === statusFilter);
 
   return (
       <div className="space-y-6">
@@ -111,7 +110,7 @@ export default function AssignedComplaintsPage() {
               </CardContent>
             </Card>
           ))}
-          
+
           {!isLoading && filtered.map((r) => {
             const username = r.user_email ? r.user_email.split("@")[0] : r.user_id.slice(0, 8);
             return (
@@ -203,6 +202,6 @@ export default function AssignedComplaintsPage() {
           </div>
         )}
       </div>
-    
+
   );
 }

@@ -216,16 +216,7 @@ async function getCurrentUserId(): Promise<string> {
 }
 
 export async function fetchReports(): Promise<ReportRead[]> {
-  const { data, error } = await supabase
-    .from("reports")
-    .select("*, users: user_id (email)")
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    throw new Error(error.message || "Failed to fetch reports.");
-  }
-
-  return (data ?? []).map(normalizeReport);
+  return apiFetch<ReportRead[]>("/reports");
 }
 
 export async function fetchReportById(id: string): Promise<ReportRead> {

@@ -20,12 +20,15 @@ export default function ManageComplaintsPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { categoryLabel, statusLabel, statuses } = useLookups();
+  const { categoryLabel, statusLabel, statuses, categories } = useLookups();
   const { role } = useRole();
   const statusOptions = (role === "officer" || role === "admin")
     ? statuses.filter((s) => isAdminOfficerStatusOption(s.name))
     : statuses;
   const [search, setSearch] = useState("");
+  const [priorityFilter, setPriorityFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [sortBy, setSortBy] = useState<"priority" | "date">("date");
 
   const { data: reports = [], isLoading } = useQuery({
     queryKey: ["reports"],
@@ -64,11 +67,24 @@ export default function ManageComplaintsPage() {
     },
   });
 
-  const filtered = reports.filter((r) =>
-    r.description.toLowerCase().includes(search.toLowerCase()) ||
-    String(r.id).includes(search.trim()) ||
-    (r.priority ?? "").toLowerCase().includes(search.toLowerCase())
-  );
+  const PRIORITY_ORDER: Record<string, number> = { "Итен": 0, "Висок": 1, "Среден": 2, "Низок": 3 };
+
+  const filtered = [...reports]
+    .filter((r) =>
+      r.description.toLowerCase().includes(search.toLowerCase()) ||
+      String(r.id).includes(search.trim()) ||
+      (r.priority ?? "").toLowerCase().includes(search.toLowerCase())
+    )
+    .filter((r) => priorityFilter === "all" || r.priority === priorityFilter)
+    .filter((r) => categoryFilter === "all" || r.category_id?.toString() === categoryFilter)
+    .sort((a, b) => {
+      if (sortBy === "priority") {
+        const pa = PRIORITY_ORDER[a.priority ?? ""] ?? 99;
+        const pb = PRIORITY_ORDER[b.priority ?? ""] ?? 99;
+        if (pa !== pb) return pa - pb;
+      }
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
 
   return (
     <div className="space-y-6">
@@ -78,13 +94,38 @@ export default function ManageComplaintsPage() {
       </div>
 
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader className="pb-3 space-y-3">
           <div className="flex items-center justify-between">
             <CardTitle>Сите пријави</CardTitle>
             <div className="relative w-64">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Пребарај пријави..." className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+              <SelectTrigger className="w-40 h-8 text-xs" aria-label="Филтрирај по приоритет"><SelectValue placeholder="Приоритет" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Сите приоритети</SelectItem>
+                {["Итен", "Висок", "Среден", "Низок"].map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="w-44 h-8 text-xs" aria-label="Филтрирај по категорија"><SelectValue placeholder="Категорија" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Сите категории</SelectItem>
+                {categories.map((c) => (
+                  <SelectItem key={c.id} value={c.id.toString()}>{getCategoryMacedonianName(c.name)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="flex gap-1 ml-auto">
+              <Button variant={sortBy === "date" ? "secondary" : "outline"} size="sm" className="text-xs h-8" onClick={() => setSortBy("date")}>По датум</Button>
+              <Button variant={sortBy === "priority" ? "secondary" : "outline"} size="sm" className="text-xs h-8" onClick={() => setSortBy("priority")}>По приоритет</Button>
+            </div>
+            {!isLoading && (
+              <span className="text-xs text-muted-foreground">{filtered.length} пријави</span>
+            )}
           </div>
         </CardHeader>
         <CardContent>

@@ -13,10 +13,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useNavigate } from "react-router-dom";
+import { getLocalPartFromEmail } from "@/lib/utils";
 
 export default function DashboardPage() {
   const navigate = useNavigate();
-  const { role } = useRole();
+  const { role, userId, userName, userEmail } = useRole();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { data: reports = [], isLoading, error } = useQuery({
@@ -144,7 +145,6 @@ export default function DashboardPage() {
                     </tr>
                   ))}
                   {!isLoading && recentReports.map((report) => {
-                    let username = report.user_email ? report.user_email.split("@")[0] : report.user_id?.slice(0, 8);
                     let mkCategory = getCategoryMacedonianName(categoryLabel(report.category_id));
                     return (
                       <tr
@@ -156,7 +156,7 @@ export default function DashboardPage() {
                       >
                         <td className="py-3 px-2">
                           <div className="font-medium text-foreground">{deriveTitle(report.description, 64)}</div>
-                          <div className="text-xs text-muted-foreground">корисник {username}</div>
+                          <div className="text-xs text-muted-foreground">корисник {getLocalPartFromEmail(report.user_email ?? (report.user_id === userId ? userEmail : undefined)) ?? (report.user_id ? `${String(report.user_id).slice(0,8)}...` : "—")}</div>
                         </td>
                         <td className="py-3 px-2" onClick={(e) => e.stopPropagation()}>
                           <Select

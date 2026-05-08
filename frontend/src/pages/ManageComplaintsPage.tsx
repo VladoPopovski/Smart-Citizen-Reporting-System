@@ -9,6 +9,7 @@ import { useState } from "react";
 import { fetchReports, updateReportPriority, updateReportStatus, type PriorityValue } from "@/services/reports";
 import { useLookups } from "@/hooks/useLookups";
 import { deriveTitle, formatDate, getPriorityLabel, getPriorityStyle, getStatusStyle, getCategoryMacedonianName, isAdminOfficerStatusOption } from "@/lib/reportHelpers";
+import { getLocalPartFromEmail } from "@/lib/utils";
 import { useRole } from "@/context/RoleContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
@@ -21,7 +22,7 @@ export default function ManageComplaintsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { categoryLabel, statusLabel, statuses, categories } = useLookups();
-  const { role } = useRole();
+  const { role, userId, userName, userEmail } = useRole();
   const statusOptions = (role === "officer" || role === "admin")
     ? statuses.filter((s) => isAdminOfficerStatusOption(s.name))
     : statuses;
@@ -155,7 +156,7 @@ export default function ManageComplaintsPage() {
                   </tr>
                 ))}
                 {!isLoading && filtered.map((r) => {
-                  let username = r.user_email ? r.user_email.split("@")[0] : r.user_id?.slice(0, 8);
+                  let username = getLocalPartFromEmail(r.user_email ?? (r.user_id === userId ? userEmail : undefined)) ?? (r.user_id ? `${String(r.user_id).slice(0, 8)}...` : "—");
                   let categoryName = categoryLabel(r.category_id);
                   let mkCategory = getCategoryMacedonianName(categoryName);
                   return (

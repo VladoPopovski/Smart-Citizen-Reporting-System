@@ -9,6 +9,7 @@ import { useNavigate } from "react-router-dom";
 import { fetchReports, updateReportPriority, updateReportStatus, type PriorityValue } from "@/services/reports";
 import { useLookups } from "@/hooks/useLookups";
 import { formatDate, formatCoords, deriveTitle, getStatusStyle, isAdminOfficerStatusOption, getPriorityLabel, getPriorityStyle, getCategoryMacedonianName } from "@/lib/reportHelpers";
+import { getLocalPartFromEmail } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRole } from "@/context/RoleContext";
@@ -29,7 +30,7 @@ export default function AssignedComplaintsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { categoryLabel, statusLabel, statuses, categories } = useLookups();
-  const { role } = useRole();
+  const { role, userId, userName, userEmail } = useRole();
   const statusOptions = (role === "officer" || role === "admin")
     ? statuses.filter((s) => isAdminOfficerStatusOption(s.name))
     : statuses;
@@ -171,8 +172,8 @@ export default function AssignedComplaintsPage() {
         ))}
 
         {!isLoading && sorted.map((r) => {
-          const username = r.user_email ? r.user_email.split("@")[0] : r.user_id.slice(0, 8);
-          return (
+          const username = getLocalPartFromEmail(r.user_email ?? (r.user_id === userId ? userEmail : undefined)) ?? (r.user_id ? `${String(r.user_id).slice(0,8)}...` : "—");
+           return (
             <Card
               key={r.id}
               className={`hover:shadow-sm transition-shadow cursor-pointer ${PRIORITY_BORDER[r.priority ?? ""] ?? "border-l-4 border-l-slate-200"}`}

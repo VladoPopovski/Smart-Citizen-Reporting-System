@@ -28,6 +28,7 @@ from app.schemas.report import (
     StatusUpdate,
 )
 from app.schemas.user import CurrentUser, UserRole
+from app.models.user import User
 from app.services.ai_service import assign_priority, classify_text, generate_confirmation_message, generate_confirmation_mk
 from app.utils.duplicate_detection import check_duplicate
 from app.utils.report_statuses import ACTIVE_STATUS_NAMES, status_ids_for_names
@@ -58,7 +59,7 @@ def _get_or_404(db: Session, report_id: UUID) -> Report:
     return report
 
 
-def _to_report_read(report: Report) -> ReportRead:
+def _to_report_read(report: Report, db: Session | None = None) -> ReportRead:
     """
     Defensive conversion to ReportRead. Accepts real ORM objects or MagicMocks used in unit tests.
     """
@@ -70,12 +71,26 @@ def _to_report_read(report: Report) -> ReportRead:
         except Exception:
             return None
 
+    user_email = None
+    try:
+        user_email = getattr(getattr(report, "user", None), "email", None)
+    except Exception:
+        user_email = None
+
+    if user_email is None and db is not None:
+        try:
+            u = db.get(User, getattr(report, "user_id", None))
+            user_email = getattr(u, "email", None) if u is not None else None
+        except Exception:
+            user_email = None
+
     return ReportRead(
         id=getattr(report, "id", None),
         description=_safe(getattr(report, "description", None)),
         category_id=_safe(getattr(report, "category_id", None), int),
         status_id=_safe(getattr(report, "status_id", None), int),
         user_id=getattr(report, "user_id", None),
+        user_email=user_email,
         latitude=getattr(report, "latitude", None),
         longitude=getattr(report, "longitude", None),
         priority=getattr(report, "priority", None),
@@ -273,7 +288,7 @@ def run_report_ai_pipeline(report_id: UUID) -> None:
 
 def list_reports(db: Session, *, current_user: CurrentUser) -> list[ReportRead]:
     try:
-        stmt = select(Report)
+        stmt = select(Report).options(joinedload(Report.user))
         if current_user.role == UserRole.citizen:
             stmt = stmt.where(Report.user_id == current_user.id)
         elif current_user.role == UserRole.officer:
@@ -283,7 +298,7 @@ def list_reports(db: Session, *, current_user: CurrentUser) -> list[ReportRead]:
             stmt = stmt.where(Report.status_id.in_(active_status_ids))
         # Admin sees all
         rows = db.scalars(stmt).all()
-        return [_to_report_read(r) for r in rows]
+        return [_to_report_read(r, db=db) for r in rows]
     except Exception as exc:
         logger.warning(
             "list_reports failed for user_id=%s role=%s; returning empty list: %s",
@@ -314,7 +329,7 @@ def get_report(db: Session, *, report_id: UUID, current_user: CurrentUser) -> Re
         active_status_ids = status_ids_for_names(db, ACTIVE_STATUS_NAMES)
         if not active_status_ids or report.status_id not in active_status_ids:
             raise HTTPException(status_code=403, detail="Not allowed")
-    return _to_report_read(report)
+    return _to_report_read(report, db=db)
 
 
 def update_report(

@@ -241,8 +241,8 @@ def export_csv(
     ).all()
 
     output = io.StringIO()
-    output.write("﻿")  # UTF-8 BOM for Excel/Cyrillic support
-    writer = csv.writer(output)
+    output.write("\ufeff")
+    writer = csv.writer(output, delimiter=';')
 
     writer.writerow(["#", "Опис", "Категорија", "Статус", "Приоритет", "Датум на пријава"])
 

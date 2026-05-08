@@ -69,13 +69,14 @@ class TestGetReport:
             report_service.get_report(_db(report), report_id=1, current_user=user)
         assert exc.value.status_code == 403
 
-    def test_officer_can_get_any_report(self):
+    def test_officer_cannot_get_inactive_report(self):
         officer = _make_user(UserRole.officer)
         report = _make_report(user_id=uuid4())
-        result = report_service.get_report(
-            _db(report), report_id=1, current_user=officer
-        )
-        assert result.id == report.id
+        with pytest.raises(HTTPException) as exc:
+            report_service.get_report(
+                _db(report), report_id=1, current_user=officer
+            )
+        assert exc.value.status_code == 403
 
     def test_admin_can_get_any_report(self):
         admin = _make_user(UserRole.admin)
@@ -135,20 +136,19 @@ class TestUpdateReport:
         assert report.status_id is None
         assert report.category_id is None
 
-    def test_officer_can_set_status_and_category(self):
+    def test_officer_cannot_update_report_fields(self):
         officer = _make_user(UserRole.officer)
         report = _make_report(user_id=uuid4())
         db = _db(report)
 
-        report_service.update_report(
-            db,
-            report_id=1,
-            report_in=_report_in(status_id=2, category_id=3),
-            current_user=officer,
-        )
-
-        assert report.status_id == 2
-        assert report.category_id == 3
+        with pytest.raises(HTTPException) as exc:
+            report_service.update_report(
+                db,
+                report_id=1,
+                report_in=_report_in(status_id=2, category_id=3),
+                current_user=officer,
+            )
+        assert exc.value.status_code == 403
 
     def test_missing_report_raises_404(self):
         user = _make_user(UserRole.citizen)
@@ -163,13 +163,14 @@ class TestUpdateReport:
 
 
 class TestDeleteReport:
-    def test_citizen_deletes_own_report(self):
+    def test_citizen_cannot_delete_own_report(self):
         user = _make_user(UserRole.citizen)
         report = _make_report(user_id=user.id)
         db = _db(report)
-        report_service.delete_report(db, report_id=1, current_user=user)
-        db.delete.assert_called_once_with(report)
-        db.commit.assert_called_once()
+        with pytest.raises(HTTPException) as exc:
+            report_service.delete_report(db, report_id=1, current_user=user)
+        assert exc.value.status_code == 403
+        db.delete.assert_not_called()
 
     def test_citizen_cannot_delete_other_report(self):
         user = _make_user(UserRole.citizen)
@@ -231,31 +232,30 @@ class TestUpdateStatus:
 
         db.add.assert_not_called()
 
-    def test_update_report_records_history_on_status_change(self):
+    def test_update_report_rejects_officer_status_change(self):
         officer = _make_user(UserRole.officer)
         report = _make_report(user_id=uuid4())
         report.status_id = 1
         db = _db(report)
 
-        report_service.update_report(
-            db, report_id=1, report_in=_report_in(status_id=2), current_user=officer
-        )
+        with pytest.raises(HTTPException) as exc:
+            report_service.update_report(
+                db, report_id=1, report_in=_report_in(status_id=2), current_user=officer
+            )
+        assert exc.value.status_code == 403
+        db.add.assert_not_called()
 
-        db.add.assert_called_once()
-        added = db.add.call_args[0][0]
-        assert added.old_status_id == 1
-        assert added.status_id == 2
-
-    def test_update_report_no_history_when_status_not_in_payload(self):
+    def test_update_report_rejects_officer_description_change(self):
         officer = _make_user(UserRole.officer)
         report = _make_report(user_id=uuid4())
         report.status_id = 1
         db = _db(report)
 
-        report_service.update_report(
-            db, report_id=1, report_in=_report_in(description="New text"), current_user=officer
-        )
-
+        with pytest.raises(HTTPException) as exc:
+            report_service.update_report(
+                db, report_id=1, report_in=_report_in(description="New text"), current_user=officer
+            )
+        assert exc.value.status_code == 403
         db.add.assert_not_called()
 
     def test_missing_report_raises_404(self):
@@ -289,11 +289,22 @@ class TestListReports:
 
 
 class TestUpdatePriority:
-    def test_officer_can_update_priority(self):
+    def test_officer_cannot_update_priority(self):
         officer = _make_user(UserRole.officer)
         report = _make_report(user_id=uuid4())
         report.priority = None
         db = _db(report)
+
+        with pytest.raises(HTTPException) as exc:
+            report_service.update_priority(
+                db,
+                report_id=1,
+                priority_in=_priority_in("High"),
+                current_user=officer,
+            )
+        assert exc.value.status_code == 403
+        db.commit.assert_not_called()
+        return
 
         result = report_service.update_priority(
             db,
@@ -304,6 +315,25 @@ class TestUpdatePriority:
 
         assert report.priority == "Висок"
         assert result.priority == "Висок"
+        db.commit.assert_called_once()
+        db.refresh.assert_called_once_with(report)
+
+
+    def test_admin_can_update_priority(self):
+        admin = _make_user(UserRole.admin)
+        report = _make_report(user_id=uuid4())
+        report.priority = None
+        db = _db(report)
+
+        result = report_service.update_priority(
+            db,
+            report_id=1,
+            priority_in=_priority_in("High"),
+            current_user=admin,
+        )
+
+        assert report.priority == "High"
+        assert result.priority == "High"
         db.commit.assert_called_once()
         db.refresh.assert_called_once_with(report)
 

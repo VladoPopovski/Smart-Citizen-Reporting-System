@@ -3,14 +3,35 @@ from io import BytesIO, StringIO
 from uuid import UUID
 import csv
 
+import os
+
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from sqlalchemy.orm import Session
+
+
+def _register_cyrillic_font() -> tuple[str, str]:
+    candidates = [
+        ("C:/Windows/Fonts/arial.ttf",   "C:/Windows/Fonts/arialbd.ttf"),
+        ("/usr/share/fonts/truetype/msttcorefonts/Arial.ttf", "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf"),
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",   "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+    ]
+    for regular, bold in candidates:
+        if os.path.exists(regular):
+            pdfmetrics.registerFont(TTFont("CyrillicFont", regular))
+            if os.path.exists(bold):
+                pdfmetrics.registerFont(TTFont("CyrillicFont-Bold", bold))
+            else:
+                pdfmetrics.registerFont(TTFont("CyrillicFont-Bold", regular))
+            return "CyrillicFont", "CyrillicFont-Bold"
+    return "Helvetica", "Helvetica-Bold"
 
 from app.db.session import get_db
 from app.schemas.attachment import AttachmentRead
@@ -54,7 +75,7 @@ def list_reports(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> list[ReportRead]:
-    """Citizens see only their own. Officers and admins see all."""
+    """Citizens see their own, officers see active reports, admins see all."""
     return report_service.list_reports(db, current_user=current_user)
 
 
@@ -64,7 +85,7 @@ def get_report(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> ReportRead:
-    """Get a single report by ID. Citizens can only fetch their own."""
+    """Citizens fetch their own, officers fetch active reports, admins fetch all."""
     return report_service.get_report(db, report_id=report_id, current_user=current_user)
 
 
@@ -73,9 +94,9 @@ def update_report(
     report_id: UUID,
     report_in: ReportUpdate,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_roles(UserRole.citizen, UserRole.admin)),
 ) -> ReportRead:
-    """Citizens update their own only. Officers/admins update any."""
+    """Citizens update their own basic fields. Admins may update any report."""
     return report_service.update_report(db, report_id=report_id, report_in=report_in, current_user=current_user)
 
 
@@ -110,9 +131,9 @@ def update_report_priority(
 def delete_report(
     report_id: UUID,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_roles(UserRole.admin)),
 ) -> None:
-    """Delete a report. Citizens can only delete their own; admins can delete any."""
+    """Delete a report. Admins only."""
     report_service.delete_report(db, report_id=report_id, current_user=current_user)
 
 
@@ -203,7 +224,7 @@ async def upload_attachment(
 
 
 # ---------------------------------------------------------------------------
-# Export (FR-08) — officer/admin only
+# Export (FR-08) — admin only
 # ---------------------------------------------------------------------------
 
 _EXPORT_COLUMNS = [
@@ -242,10 +263,9 @@ def export_reports_csv(
     extractors = [extractor for _, extractor in _EXPORT_COLUMNS]
 
     def _iter_csv():
-        # UTF-8 BOM so Excel renders Cyrillic correctly.
         yield "﻿"
         buffer = StringIO()
-        writer = csv.writer(buffer)
+        writer = csv.writer(buffer, delimiter=';', lineterminator='\r\n', quoting=csv.QUOTE_MINIMAL)
         writer.writerow(headers)
         yield buffer.getvalue()
         buffer.seek(0)
@@ -278,6 +298,8 @@ def export_reports_pdf(
         db, status=status, category=category, date_from=date_from, date_to=date_to,
     )
 
+    font_regular, font_bold = _register_cyrillic_font()
+
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -286,28 +308,32 @@ def export_reports_pdf(
         topMargin=12 * mm, bottomMargin=12 * mm,
         title="Reports export",
     )
-    styles = getSampleStyleSheet()
+
+    title_style  = ParagraphStyle("CyrTitle",  fontName=font_bold,    fontSize=16, spaceAfter=4)
+    normal_style = ParagraphStyle("CyrNormal", fontName=font_regular, fontSize=9,  spaceAfter=2)
+    cell_style   = ParagraphStyle("CyrCell",   fontName=font_regular, fontSize=8)
 
     story = [
-        Paragraph("Reports export", styles["Title"]),
-        Paragraph(_pdf_filter_summary(status, category, date_from, date_to), styles["Normal"]),
+        Paragraph("Извоз на пријави", title_style),
+        Paragraph(_pdf_filter_summary(status, category, date_from, date_to), normal_style),
         Spacer(1, 6 * mm),
     ]
 
     headers = [label for label, _ in _EXPORT_COLUMNS]
     extractors = [extractor for _, extractor in _EXPORT_COLUMNS]
-    cell_style = styles["BodyText"]
 
     table_data = [headers]
     for r in reports:
-        # Wrap each cell in Paragraph so long descriptions wrap inside the column.
         table_data.append([Paragraph(str(extract(r)), cell_style) for extract in extractors])
 
-    table = Table(table_data, repeatRows=1)
+    # Column widths summing to available landscape A4 width (273 mm)
+    col_widths = [10*mm, 65*mm, 27*mm, 24*mm, 19*mm, 21*mm, 21*mm, 33*mm, 33*mm, 20*mm]
+    table = Table(table_data, repeatRows=1, colWidths=col_widths)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f4e79")),
         ("TEXTCOLOR",  (0, 0), (-1, 0), colors.whitesmoke),
-        ("FONTNAME",   (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME",   (0, 0), (-1, 0), font_bold),
+        ("FONTNAME",   (0, 1), (-1, -1), font_regular),
         ("FONTSIZE",   (0, 0), (-1, -1), 8),
         ("VALIGN",     (0, 0), (-1, -1), "TOP"),
         ("GRID",       (0, 0), (-1, -1), 0.25, colors.grey),
@@ -317,7 +343,7 @@ def export_reports_pdf(
 
     if not reports:
         story.append(Spacer(1, 4 * mm))
-        story.append(Paragraph("No reports matched the given filters.", styles["Italic"]))
+        story.append(Paragraph("Нема пријави за избраните филтри.", normal_style))
 
     doc.build(story)
     buffer.seek(0)

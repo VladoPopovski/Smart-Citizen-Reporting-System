@@ -34,7 +34,7 @@ export function StatusTimeline({ entries }: Props) {
           </div>
           {/* content */}
           <div className="space-y-1">
-            <Badge variant="outline" className={getStatusStyle(entry.status_id)}>
+            <Badge variant="outline" className={getStatusStyle(statusLabel(entry.status_id))}>
               {statusLabel(entry.status_id)}
             </Badge>
             <p className="text-xs text-muted-foreground">{formatDate(entry.created_at)}</p>

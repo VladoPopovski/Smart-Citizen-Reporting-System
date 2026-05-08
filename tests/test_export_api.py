@@ -113,10 +113,10 @@ class TestExportCSV:
         assert cd.startswith("attachment; filename=")
         assert re.search(r'filename="reports-\d{8}-\d{6}\.csv"', cd)
 
-    def test_officer_can_export(self, client: TestClient):
+    def test_officer_forbidden(self, client: TestClient):
         _act_as(OFFICER_USER)
         resp = client.get(f"{REPORTS_PREFIX}/export/csv")
-        assert resp.status_code == 200
+        assert resp.status_code == 403
 
     def test_citizen_forbidden(self, client: TestClient):
         _act_as(CITIZEN_USER)
@@ -183,10 +183,10 @@ class TestExportPDF:
         assert cd.startswith("attachment; filename=")
         assert re.search(r'filename="reports-\d{8}-\d{6}\.pdf"', cd)
 
-    def test_officer_can_export_pdf(self, client: TestClient):
+    def test_officer_forbidden_pdf(self, client: TestClient):
         _act_as(OFFICER_USER)
         resp = client.get(f"{REPORTS_PREFIX}/export/pdf")
-        assert resp.status_code == 200
+        assert resp.status_code == 403
 
     def test_citizen_forbidden(self, client: TestClient):
         _act_as(CITIZEN_USER)

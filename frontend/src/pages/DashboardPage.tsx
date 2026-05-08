@@ -1,7 +1,9 @@
-import { AppLayout } from "@/components/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Clock, CheckCircle, AlertTriangle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { FileText, Clock, CheckCircle, AlertTriangle, ClipboardList } from "lucide-react";
+import { useRole } from "@/context/RoleContext";
+import { isActiveStatus, isAdminOfficerStatusOption, isResolvedStatus } from "@/lib/reportHelpers";
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchReports, updateReportStatus, updateReportCategory } from "@/services/reports";
@@ -10,55 +12,12 @@ import { formatDate, deriveTitle, getPriorityLabel, getPriorityStyle, getStatusS
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-
-const ACTIVE_STATUS_NAMES = new Set([
-  "active",
-  "aktiven",
-  "aktivna",
-  "aktivni",
-  "активен",
-  "активна",
-  "активно",
-  "активни",
-  "submitted",
-  "in progress",
-  "pending",
-  "нов",
-  "нова",
-  "поднесен",
-  "поднесена",
-  "во тек",
-  "на чекање",
-]);
-
-const RESOLVED_STATUS_NAMES = new Set([
-  "resolved",
-  "closed",
-  "resen",
-  "reshen",
-  "решен",
-  "решена",
-  "решено",
-  "решени",
-  "затворен",
-  "затворена",
-  "затворено",
-  "затворени",
-]);
-
-function normalizeStatusName(status: string): string {
-  return status.trim().toLowerCase().replace(/[_-]/g, " ").replace(/\s+/g, " ");
-}
-
-function isActiveStatus(status: string): boolean {
-  return ACTIVE_STATUS_NAMES.has(normalizeStatusName(status));
-}
-
-function isResolvedStatus(status: string): boolean {
-  return RESOLVED_STATUS_NAMES.has(normalizeStatusName(status));
-}
+import { useNavigate } from "react-router-dom";
+import { getLocalPartFromEmail } from "@/lib/utils";
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
+  const { role, userId, userName, userEmail } = useRole();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { data: reports = [], isLoading, error } = useQuery({
@@ -66,6 +25,9 @@ export default function DashboardPage() {
     queryFn: fetchReports,
   });
   const { statusLabel, categoryLabel, statuses, categories } = useLookups();
+  const statusOptions = (role === "officer" || role === "admin")
+    ? statuses.filter((s) => isAdminOfficerStatusOption(s.name))
+    : statuses;
 
   const statusMutation = useMutation({
     mutationFn: ({ reportId, status_id }: { reportId: string; status_id: number }) =>
@@ -126,7 +88,6 @@ export default function DashboardPage() {
   ];
 
   return (
-    <AppLayout>
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Контролна табла</h1>
@@ -166,7 +127,6 @@ export default function DashboardPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-muted-foreground">
-                    {/* <th className="text-left py-3 px-2 font-medium">ID</th> */}
                     <th className="text-left py-3 px-2 font-medium">Наслов</th>
                     <th className="text-left py-3 px-2 font-medium">Категорија</th>
                     <th className="text-left py-3 px-2 font-medium">Статус</th>
@@ -175,24 +135,30 @@ export default function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {isLoading && (
-                    <tr>
-                      <td colSpan={5} className="py-8 text-center text-muted-foreground">Се вчитуваат пријавите...</td>
+                  {isLoading && Array.from({ length: 5 }).map((_, idx) => (
+                    <tr key={`skeleton-row-${idx}`} className="border-b last:border-0">
+                      <td className="py-3 px-2"><Skeleton className="h-5 w-48 mb-1" /><Skeleton className="h-3 w-24" /></td>
+                      <td className="py-3 px-2"><Skeleton className="h-8 w-[140px]" /></td>
+                      <td className="py-3 px-2"><Skeleton className="h-8 w-[140px]" /></td>
+                      <td className="py-3 px-2"><Skeleton className="h-4 w-24" /></td>
+                      <td className="py-3 px-2"><Skeleton className="h-6 w-16" /></td>
                     </tr>
-                  )}
+                  ))}
                   {!isLoading && recentReports.map((report) => {
-                    let username = report.user_email ? report.user_email.split("@")[0] : report.user_id?.slice(0, 8);
                     let mkCategory = getCategoryMacedonianName(categoryLabel(report.category_id));
                     return (
                       <tr
                         key={report.id}
-                        className="border-b last:border-0 hover:bg-secondary/50 transition-colors"
+                        className="border-b last:border-0 hover:bg-secondary/50 transition-colors cursor-pointer"
+                        onClick={() => navigate(`/complaints/${report.id}`)}
+                        role="link"
+                        aria-label={`Пријава: ${deriveTitle(report.description)}`}
                       >
                         <td className="py-3 px-2">
                           <div className="font-medium text-foreground">{deriveTitle(report.description, 64)}</div>
-                          <div className="text-xs text-muted-foreground">корисник {username}</div>
+                          <div className="text-xs text-muted-foreground">корисник {getLocalPartFromEmail(report.user_email ?? (report.user_id === userId ? userEmail : undefined)) ?? (report.user_id ? `${String(report.user_id).slice(0,8)}...` : "—")}</div>
                         </td>
-                        <td className="py-3 px-2">
+                        <td className="py-3 px-2" onClick={(e) => e.stopPropagation()}>
                           <Select
                             value={report.category_id?.toString() ?? undefined}
                             onValueChange={(value) => {
@@ -202,7 +168,7 @@ export default function DashboardPage() {
                             }}
                             disabled={categoryMutation.isPending}
                           >
-                            <SelectTrigger className="w-[140px] text-xs">
+                            <SelectTrigger className="w-[140px] text-xs" aria-label="Промени категорија">
                               <SelectValue placeholder="Избери категорија" />
                             </SelectTrigger>
                             <SelectContent>
@@ -214,7 +180,7 @@ export default function DashboardPage() {
                             </SelectContent>
                           </Select>
                         </td>
-                        <td className="py-3 px-2">
+                        <td className="py-3 px-2" onClick={(e) => e.stopPropagation()}>
                           <Select
                             value={report.status_id?.toString() ?? undefined}
                             onValueChange={(value) => {
@@ -224,11 +190,11 @@ export default function DashboardPage() {
                             }}
                             disabled={statusMutation.isPending}
                           >
-                            <SelectTrigger className="w-[140px] text-xs">
+                            <SelectTrigger className="w-[140px] text-xs" aria-label="Промени статус">
                               <SelectValue placeholder="Избери статус" />
                             </SelectTrigger>
                             <SelectContent>
-                              {statuses.map((s) => (
+                              {statusOptions.map((s) => (
                                 <SelectItem key={s.id} value={s.id.toString()}>
                                   {s.name}
                                 </SelectItem>
@@ -247,12 +213,33 @@ export default function DashboardPage() {
                   })}
                   {!isLoading && !error && recentReports.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="py-8 text-center text-muted-foreground">Нема пријави.</td>
+                      <td colSpan={5} className="py-20 text-center">
+                        <div className="space-y-4">
+                           <div className="bg-muted w-12 h-12 rounded-full flex items-center justify-center mx-auto">
+                              <FileText className="h-6 w-6 text-muted-foreground" />
+                           </div>
+                           <div className="space-y-1">
+                              <p className="font-medium text-foreground">Нема нови пријави.</p>
+                              <p className="text-sm text-muted-foreground">Сите пријави се решени или нема поднесено нови.</p>
+                           </div>
+                           <Button
+                             variant="outline"
+                             size="sm"
+                             className="gap-2"
+                             onClick={() => navigate(role === "admin" ? "/manage-complaints" : "/assigned-complaints")}
+                           >
+                             <ClipboardList className="h-4 w-4" /> Прегледај ги пријавите
+                           </Button>
+                        </div>
+                      </td>
                     </tr>
                   )}
                   {!isLoading && error && (
                     <tr>
-                      <td colSpan={5} className="py-8 text-center text-destructive">Неуспешно вчитување на пријавите.</td>
+                      <td colSpan={5} className="py-8 text-center text-destructive">
+                         Неуспешно вчитување на пријавите.
+                         <Button variant="link" size="sm" onClick={() => queryClient.invalidateQueries({ queryKey: ["reports"] })}>Обиди се повторно</Button>
+                      </td>
                     </tr>
                   )}
                 </tbody>
@@ -261,6 +248,5 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
-    </AppLayout>
   );
 }

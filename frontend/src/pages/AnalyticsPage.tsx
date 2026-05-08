@@ -1,26 +1,38 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AppLayout } from "@/components/AppLayout";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { TrendingUp, FileText, CheckCircle, Clock, Users, Download, FileJson, FileSpreadsheet, Loader2 } from "lucide-react";
+import { FileText, CheckCircle, Clock, Users, Download, FileSpreadsheet, Loader2 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend } from "recharts";
-import { fetchAnalyticsSummary, exportToCsv, exportToPdf } from "@/services/analytics";
+import { fetchAnalyticsSummary, exportToCsv, exportToPdf, fetchCategoryRatings } from "@/services/analytics";
 import { useToast } from "@/hooks/use-toast";
 import { getCategoryMacedonianName } from "@/lib/reportHelpers";
+import { useRole } from "@/context/RoleContext";
 
 const COLORS = ["hsl(142, 71%, 45%)", "hsl(38, 92%, 50%)"];
 
 export default function AnalyticsPage() {
   const { toast } = useToast();
+  const { role } = useRole();
   const [exportingCsv, setExportingCsv] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [ratingSort, setRatingSort] = useState<"desc" | "asc">("desc");
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading: isSummaryLoading, error: summaryError } = useQuery({
     queryKey: ["analytics", "summary"],
     queryFn: fetchAnalyticsSummary,
   });
+
+  const { data: ratingData, isLoading: isRatingsLoading } = useQuery({
+    queryKey: ["analytics", "ratings"],
+    queryFn: fetchCategoryRatings,
+    enabled: role === "admin",
+  });
+
+  const isLoading = isSummaryLoading || (role === "admin" && isRatingsLoading);
+  const error = summaryError;
 
   const handleExportCsv = async () => {
     setExportingCsv(true);
@@ -48,7 +60,7 @@ export default function AnalyticsPage() {
 
   if (isLoading) {
     return (
-      <AppLayout>
+
         <div className="space-y-6">
           <div className="flex justify-between items-end">
             <div className="space-y-2">
@@ -70,26 +82,26 @@ export default function AnalyticsPage() {
             <Skeleton className="h-[350px]" />
           </div>
         </div>
-      </AppLayout>
+
     );
   }
 
   if (error || !data) {
     return (
-      <AppLayout>
+
         <div className="text-center py-12 text-destructive">
           <p className="font-semibold">Грешка при вчитување на аналитиката.</p>
           <Button variant="outline" className="mt-4" onClick={() => window.location.reload()}>Обиди се повторно</Button>
         </div>
-      </AppLayout>
+
     );
   }
 
   const statCards = [
-    { label: "ВКУПНО ПРИЈАВИ", value: data.kpis.total, icon: FileText, trend: "+12.5%", color: "text-primary" },
-    { label: "РЕШЕНИ СЛУЧАИ", value: data.kpis.resolved, icon: CheckCircle, trend: "+8.2%", color: "text-success" },
-    { label: "ПРОСЕЧНО ВРЕМЕ", value: data.kpis.avgTime, icon: Clock, trend: "-1.1 ден", color: "text-warning" },
-    { label: "АКТИВНИ ПРИЈАВИ", value: data.kpis.active.toLocaleString(), icon: Users, trend: "+5.4%", color: "text-info" },
+    { label: "ВКУПНО ПРИЈАВИ", value: data.kpis.total, icon: FileText, color: "text-primary" },
+    { label: "РЕШЕНИ СЛУЧАИ", value: data.kpis.resolved, icon: CheckCircle, color: "text-success" },
+    { label: "ПРОСЕЧНО ВРЕМЕ", value: data.kpis.avgTime, icon: Clock, color: "text-warning" },
+    { label: "АКТИВНИ ПРИЈАВИ", value: data.kpis.active.toLocaleString(), icon: Users, color: "text-info" },
   ];
   const categoryChartData = data.categoryData.map((category) => ({
     ...category,
@@ -97,7 +109,6 @@ export default function AnalyticsPage() {
   }));
 
   return (
-    <AppLayout>
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
           <div>
@@ -105,26 +116,27 @@ export default function AnalyticsPage() {
             <p className="text-muted-foreground text-sm">Следете ги перформансите и задоволството на граѓаните во реално време.</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={handleExportCsv} disabled={exportingCsv}>
-              {exportingCsv ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
-              Извези CSV
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={exportingPdf}>
-              {exportingPdf ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-              Извези PDF
-            </Button>
+            {role === "admin" && (
+              <>
+                <Button variant="outline" size="sm" onClick={handleExportCsv} disabled={exportingCsv} aria-label="Извези податоци во CSV формат">
+                  {exportingCsv ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
+                  Извези CSV
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={exportingPdf} aria-label="Извези податоци во PDF формат">
+                  {exportingPdf ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                  Извези PDF
+                </Button>
+              </>
+            )}
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" role="region" aria-label="Клучни показатели">
           {statCards.map((s) => (
             <Card key={s.label}>
               <CardContent className="py-5 space-y-2">
                 <div className="flex items-center justify-between">
                   <s.icon className={`h-5 w-5 ${s.color}`} />
-                  <span className="text-xs font-medium text-success flex items-center gap-0.5">
-                    <TrendingUp className="h-3 w-3" /> {s.trend}
-                  </span>
                 </div>
                 <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium">{s.label}</p>
                 <p className="text-2xl font-bold text-foreground">{s.value}</p>
@@ -185,27 +197,88 @@ export default function AnalyticsPage() {
           </Card>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Месечен тренд</CardTitle>
-            <p className="text-xs text-muted-foreground">Споредба меѓу пристигнати, активни и решени пријави</p>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={250}>
-              <LineChart data={data.monthlyData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(220, 13%, 91%)" />
-                <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="complaints" name="Пријави" stroke="hsl(217, 91%, 60%)" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="resolved" name="Решени" stroke="hsl(142, 71%, 45%)" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="active" name="Активни" stroke="hsl(38, 92%, 50%)" strokeWidth={2} dot={{ r: 3 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
+        {role === "admin" && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Месечен тренд</CardTitle>
+              <p className="text-xs text-muted-foreground">Споредба меѓу пристигнати, активни и решени пријави</p>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={250}>
+                <LineChart data={data.monthlyData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(220, 13%, 91%)" />
+                  <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="complaints" name="Пријави" stroke="hsl(217, 91%, 60%)" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="resolved" name="Решени" stroke="hsl(142, 71%, 45%)" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="active" name="Активни" stroke="hsl(38, 92%, 50%)" strokeWidth={2} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
+
+        {role === "admin" && ratingData && ratingData.length > 0 && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <CardTitle className="text-base">Задоволство на граѓаните по оддел</CardTitle>
+                  <p className="text-xs text-muted-foreground">Просечна оцена (1-5 ѕвезди) врз основа на затворени пријави</p>
+                </div>
+                <div className="flex gap-2">
+                   <Button 
+                    variant={ratingSort === "desc" ? "secondary" : "outline"} 
+                    size="xs" 
+                    className="text-[10px] h-7 px-2"
+                    onClick={() => setRatingSort("desc")}
+                   >
+                     Највисоки
+                   </Button>
+                   <Button 
+                    variant={ratingSort === "asc" ? "secondary" : "outline"} 
+                    size="xs" 
+                    className="text-[10px] h-7 px-2"
+                    onClick={() => setRatingSort("asc")}
+                   >
+                     Најниски
+                   </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart
+                  data={[...ratingData]
+                    .sort((a, b) => ratingSort === "desc" ? b.average_stars - a.average_stars : a.average_stars - b.average_stars)
+                    .map(r => ({
+                      ...r,
+                      name: getCategoryMacedonianName(r.category_name)
+                    }))
+                  }
+                  layout="vertical"
+                  margin={{ left: 40, right: 40 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="hsl(220, 13%, 91%)" />
+                  <XAxis type="number" domain={[0, 5]} ticks={[0, 1, 2, 3, 4, 5]} />
+                  <YAxis dataKey="name" type="category" width={120} tick={{ fontSize: 12 }} />
+                  <Tooltip 
+                    formatter={(value: number) => [`${value.toFixed(1)} ѕвезди`, "Просечна оцена"]}
+                  />
+                  <Bar 
+                    dataKey="average_stars" 
+                    name="Оцена" 
+                    fill="hsl(45, 93%, 47%)" 
+                    radius={[0, 4, 4, 0]} 
+                    barSize={32}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
       </div>
-    </AppLayout>
   );
 }

@@ -12,6 +12,10 @@ class UserRole(str, enum.Enum):
     admin = "admin"
 
 
+class UserSettings(BaseModel):
+    email_notifications: bool = True
+
+
 class UserRead(BaseModel):
     """
     User schema for API responses (backed by DB model in a real implementation).
@@ -21,7 +25,25 @@ class UserRead(BaseModel):
 
     id: UUID
     email: EmailStr
+    full_name: str | None = None
     role: UserRole
+    settings: UserSettings = UserSettings()
+
+    @classmethod
+    def from_orm_with_settings(cls, user: object) -> "UserRead":
+        return cls(
+            id=getattr(user, "id"),
+            email=getattr(user, "email"),
+            full_name=getattr(user, "full_name", None),
+            role=getattr(user, "role"),
+            settings=UserSettings(
+                email_notifications=getattr(user, "email_notifications", True)
+            ),
+        )
+
+
+class UserSettingsUpdate(BaseModel):
+    email_notifications: bool | None = None
 
 
 class CurrentUser(BaseModel):

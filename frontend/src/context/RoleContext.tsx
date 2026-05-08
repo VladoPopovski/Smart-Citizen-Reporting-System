@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, ReactNode } fr
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/services/api";
+import { getLocalPartFromEmail } from "@/lib/utils";
 
 export type UserRole = "citizen" | "officer" | "admin";
 
@@ -11,9 +12,11 @@ interface RoleContextType {
   role: UserRole;
   setRole: (role: UserRole) => void;
   userName: string;
+  userId: string | null;
+  userEmail: string | null;
   isLoggedIn: boolean;
   isAuthLoading: boolean;
-  login: (email: string, password: string, selectedRole: UserRole) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, role: UserRole) => Promise<{ emailConfirmationRequired: boolean }>;
   logout: () => Promise<void>;
 }
@@ -25,6 +28,8 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [userName, setUserName] = useState("Корисник");
+  const [userId, setUserId] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   const getRoleFromSession = (session: Session): UserRole => {
     const raw =
@@ -37,11 +42,6 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     }
 
     return "citizen";
-  };
-
-  const displayNameFromEmail = (email?: string | null): string => {
-    if (!email) return "Корисник";
-    return email.split("@")[0] || "Корисник";
   };
 
   const getStoredRoleOverride = (): UserRole | null => {
@@ -67,20 +67,31 @@ export function RoleProvider({ children }: { children: ReactNode }) {
       setIsLoggedIn(false);
       setRole("citizen");
       setUserName("Корисник");
+      setUserId(null);
       return;
     }
 
     localStorage.setItem("auth_token", session.access_token);
     setIsLoggedIn(true);
+    setUserId(session.user.id);
+    setUserEmail(session.user.email ?? null);
     const roleOverride = getStoredRoleOverride();
-    const sessionUserName = displayNameFromEmail(session.user.email);
+    const sessionUserName = getLocalPartFromEmail(session.user.email);
     setRole(roleOverride ?? getRoleFromSession(session));
     setUserName(sessionUserName);
 
     try {
       const me = await apiFetch<{ id: string; email: string | null; role: UserRole }>("/users/me");
+      if (roleOverride && roleOverride !== me.role) {
+        await apiFetch("/users/me/role", {
+          method: "PATCH",
+          body: JSON.stringify({ role: roleOverride }),
+        });
+      }
       setRole(roleOverride ?? me.role);
-      setUserName(session.user.email ? sessionUserName : displayNameFromEmail(me.email));
+      setUserName(session.user.email ? sessionUserName : getLocalPartFromEmail(me.email));
+      setUserEmail(session.user.email ?? me.email ?? null);
+      setUserId(me.id);
     } catch {
       // Keep session-derived role/email if backend profile sync is not yet available.
     }
@@ -117,8 +128,8 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const login = async (email: string, password: string, selectedRole: UserRole) => {
-    setRoleOverride(selectedRole);
+  const login = async (email: string, password: string) => {
+    clearRoleOverride();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
       clearRoleOverride();
@@ -127,6 +138,8 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   };
 
   const register = async (email: string, password: string, selectedRole: UserRole) => {
+    setRoleOverride(selectedRole);
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -135,7 +148,10 @@ export function RoleProvider({ children }: { children: ReactNode }) {
       },
     });
 
-    if (error) throw error;
+    if (error) {
+      clearRoleOverride();
+      throw error;
+    }
 
     return {
       emailConfirmationRequired: !data.session,
@@ -149,11 +165,12 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     setIsLoggedIn(false);
     setRole("citizen");
     setUserName("Корисник");
+    setUserId(null);
   };
 
   const contextValue = useMemo(
-    () => ({ role, setRole, userName, isLoggedIn, isAuthLoading, login, register, logout }),
-    [role, userName, isLoggedIn, isAuthLoading],
+    () => ({ role, setRole, userName, userId, userEmail, isLoggedIn, isAuthLoading, login, register, logout }),
+    [role, userName, userId, userEmail, isLoggedIn, isAuthLoading],
   );
 
   return (

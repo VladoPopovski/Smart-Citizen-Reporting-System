@@ -45,11 +45,26 @@ def get_current_user_logic(
         )
 
     email = payload.get("email")
-    raw_role = payload.get("app_role") or payload.get("role") or UserRole.citizen.value
-    try:
-        role = UserRole(str(raw_role))
-    except Exception:
-        role = UserRole.citizen
+    user_metadata = payload.get("user_metadata") or {}
+    app_metadata = payload.get("app_metadata") or {}
+
+    # Only treat the role as explicit when the JWT actually carries a claim.
+    # Falling back to "citizen" here would overwrite a DB-managed role (e.g.
+    # an officer whose Supabase token has no app_role claim).
+    raw_role_claim = (
+        payload.get("app_role")
+        or app_metadata.get("app_role")
+        or user_metadata.get("app_role")
+        or user_metadata.get("role")
+    )
+    explicit_role: UserRole | None = None
+    if raw_role_claim:
+        try:
+            explicit_role = UserRole(str(raw_role_claim))
+        except Exception:
+            pass
+
+    db_user = user_service.upsert_user(db, user_id=user_id, email=email, role=explicit_role)
 
     db.execute(
         text("select set_config('request.jwt.claim.sub', :sub, true)"),
@@ -57,7 +72,7 @@ def get_current_user_logic(
     )
     db.execute(
         text("select set_config('request.jwt.claim.role', :role, true)"),
-        {"role": role.value},
+        {"role": db_user.role.value},
     )
     db.execute(
         text("select set_config('request.jwt.claims', :claims, true)"),
@@ -66,17 +81,14 @@ def get_current_user_logic(
                 {
                     "sub": str(user_id),
                     "email": email,
-                    "role": role.value,
-                    "app_role": role.value,
+                    "role": db_user.role.value,
+                    "app_role": db_user.role.value,
                 }
             )
         },
     )
 
-    # ✅ BE2: Upsert — создај корисник во DB ако не постои
-    user_service.upsert_user(db, user_id=user_id, email=email, role=role)
-
-    return CurrentUser(id=user_id, email=email, role=role)
+    return CurrentUser(id=user_id, email=email, role=db_user.role)
 
 
 def require_roles(*allowed_roles: UserRole):

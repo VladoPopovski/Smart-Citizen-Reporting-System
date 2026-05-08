@@ -1,15 +1,8 @@
-// Status style mapping (fallback visual styles by status_id)
-const statusStyles: Record<number, string> = {
-  1: "bg-info/10 text-info border-info/20",
-  2: "bg-warning/10 text-warning border-warning/20",
-  3: "bg-muted text-muted-foreground",
-  4: "bg-success/10 text-success border-success/20",
-  5: "bg-destructive/10 text-destructive border-destructive/20",
-};
-
-export function getStatusStyle(id: number | null): string {
-  if (id == null) return "bg-muted text-muted-foreground";
-  return statusStyles[id] ?? "bg-muted text-muted-foreground";
+export function getStatusStyle(statusName: string | null | undefined): string {
+  const n = (statusName ?? "").trim().toLowerCase();
+  if (RESOLVED_STATUS_NAMES.has(n)) return "bg-success/10 text-success border-success/20";
+  if (ACTIVE_STATUS_NAMES.has(n))   return "bg-info/10 text-info border-info/20";
+  return "bg-muted text-muted-foreground";
 }
 
 export function deriveTitle(description: string, maxLen = 50): string {
@@ -71,4 +64,65 @@ export const CATEGORY_TRANSLATIONS: Record<string, string> = {
 
 export function getCategoryMacedonianName(categoryName: string): string {
   return CATEGORY_TRANSLATIONS[categoryName] || categoryName;
+}
+
+const ACTIVE_STATUS_NAMES = new Set([
+  "active",
+  "aktiven",
+  "aktivna",
+  "aktivni",
+  "активен",
+  "активна",
+  "активно",
+  "активни",
+  "submitted",
+  "in progress",
+  "pending",
+  "нов",
+  "нова",
+  "поднесен",
+  "поднесена",
+  "во тек",
+  "на чекање",
+]);
+
+const RESOLVED_STATUS_NAMES = new Set([
+  "resolved",
+  "closed",
+  "resen",
+  "reshen",
+  "решен",
+  "решена",
+  "решено",
+  "решени",
+  "затворен",
+  "затворена",
+  "затворено",
+  "затворени",
+]);
+
+const ADMIN_OFFICER_STATUS_OPTION_NAMES = new Set([
+  "aktiven",
+  "активен",
+  "Ð°ÐºÑ‚Ð¸Ð²ÐµÐ½",
+  "resen",
+  "reshen",
+  "решен",
+  "Ñ€ÐµÑˆÐµÐ½",
+]);
+
+function normalizeStatusName(status: string): string {
+  return status.trim().toLowerCase().replace(/[_-]/g, " ").replace(/\s+/g, " ");
+}
+
+export function isActiveStatus(status: string): boolean {
+  return ACTIVE_STATUS_NAMES.has(normalizeStatusName(status));
+}
+
+export function isResolvedStatus(status: string): boolean {
+  return RESOLVED_STATUS_NAMES.has(normalizeStatusName(status));
+}
+
+export function isAdminOfficerStatusOption(status: string): boolean {
+  return ADMIN_OFFICER_STATUS_OPTION_NAMES.has(normalizeStatusName(status));
 }

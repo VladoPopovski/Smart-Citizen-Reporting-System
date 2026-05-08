@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     ai_openai_timeout_seconds: float = 15.0
     openai_api_key: str | None = None
 
+    # --- Email / SMTP ---
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None  # defaults to smtp_user if not set
+
     # Optional: persist an AI-generated confirmation message as a Comment.
     # Must reference an existing user UUID in the `users` table.
     ai_confirmation_comment_user_id: UUID | None = None

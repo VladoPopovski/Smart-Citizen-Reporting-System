@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AppLayout } from "@/components/AppLayout";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -65,7 +65,6 @@ export default function NewComplaintPage() {
   };
 
   return (
-    <AppLayout>
       <div className="max-w-3xl mx-auto space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Нова пријава</h1>
@@ -102,19 +101,31 @@ export default function NewComplaintPage() {
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   rows={5}
+                  aria-required="true"
+                  aria-describedby="description-hint"
                 />
-                <p className="text-xs text-muted-foreground italic">Минимум 20 карактери.</p>
+                <p id="description-hint" className="text-xs text-muted-foreground italic">Минимум 20 карактери.</p>
               </div>
 
               {/* Location picker */}
               <div className="space-y-2">
-                <Label>Локација (опционално)</Label>
+                <Label id="location-label">Локација (опционално)</Label>
                 <p className="text-xs text-muted-foreground">Кликнете на мапата за да ја означите локацијата на проблемот.</p>
-                <LocationPicker lat={lat} lng={lng} onChange={(la, ln) => { setLat(la); setLng(ln); }} />
+                <LocationPicker 
+                  lat={lat} 
+                  lng={lng} 
+                  onChange={(la, ln) => { setLat(la); setLng(ln); }} 
+                />
                 {lat != null && lng != null && (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-muted-foreground" aria-live="polite">
                     Координати: {lat.toFixed(5)}, {lng.toFixed(5)}
-                    <Button type="button" variant="link" className="text-xs ml-2 p-0 h-auto" onClick={() => { setLat(null); setLng(null); }}>
+                    <Button 
+                      type="button" 
+                      variant="link" 
+                      className="text-xs ml-2 p-0 h-auto" 
+                      onClick={() => { setLat(null); setLng(null); }}
+                      aria-label="Отстрани ја избраната локација"
+                    >
                       Отстрани
                     </Button>
                   </p>
@@ -143,6 +154,5 @@ export default function NewComplaintPage() {
           </Card>
         </form>
       </div>
-    </AppLayout>
   );
 }

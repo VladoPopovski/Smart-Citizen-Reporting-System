@@ -76,6 +76,7 @@ class ReportRead(ReportBase):
     category_id: int | None = None
     status_id: int | None = None
     user_id: UUID
+    user_email: str | None = None
     created_at: datetime
     updated_at: datetime
     possible_duplicate_of: UUID | None = None

@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.models.notification import Notification
 from app.models.report import Report
+from app.models.user import User
 from app.schemas.notification import NotificationRead
+from app.services.email_service import send_email_background
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +24,8 @@ def create_comment_notification(
     if report.user_id == commenter_user_id:
         return
 
-    message = (
-        f"New comment added to your report #{report.id}"
-        + (f': "{report.title}"' if report.title else ".")
-    )
+    title_suffix = f': "{report.description[:50]}"' if report.description else "."
+    message = f"Нов коментар е додаден на вашата пријава #{report.id}{title_suffix}"
 
     db.add(Notification(
         user_id=report.user_id,
@@ -39,13 +39,54 @@ def create_comment_notification(
         report.id,
     )
 
+    user = db.get(User, report.user_id)
+    if user and user.email_notifications:
+        send_email_background(
+            user.email,
+            f"Нов коментар на вашата пријава #{report.id}",
+            message,
+        )
+
+
+def create_status_change_notification(
+    db: Session,
+    *,
+    report: Report,
+    new_status_name: str,
+) -> None:
+    title_suffix = f': "{report.description[:50]}"' if report.description else ""
+    message = (
+        f"Статусот на вашата пријава #{report.id}{title_suffix} "
+        f'е променет во "{new_status_name}".'
+    )
+    db.add(Notification(
+        user_id=report.user_id,
+        report_id=report.id,
+        message=message,
+        is_read=False,
+    ))
+    logger.info(
+        "Status-change notification queued for user_id=%s on report_id=%d (status=%s)",
+        report.user_id,
+        report.id,
+        new_status_name,
+    )
+
+    user = db.get(User, report.user_id)
+    if user and user.email_notifications:
+        send_email_background(
+            user.email,
+            f"Ажурирање на пријава #{report.id}",
+            message,
+        )
+
 
 def create_rating_invitation_notification(db: Session, *, report: Report) -> None:
     """Invite the report's owner to leave a rating after their report is closed (CR-06)."""
-    title_suffix = f': "{report.title}"' if report.title else "."
+    title_suffix = f': "{report.description[:50]}"' if report.description else ""
     message = (
-        f"Your report #{report.id} has been closed{title_suffix} "
-        "Please leave a rating."
+        f"Вашата пријава #{report.id}{title_suffix} е затворена. "
+        "Ве молиме оставете оцена."
     )
     db.add(Notification(
         user_id=report.user_id,
@@ -58,6 +99,14 @@ def create_rating_invitation_notification(db: Session, *, report: Report) -> Non
         report.user_id,
         report.id,
     )
+
+    user = db.get(User, report.user_id)
+    if user and user.email_notifications:
+        send_email_background(
+            user.email,
+            f"Оцени ја пријава #{report.id}",
+            message,
+        )
 
 
 def list_notifications(

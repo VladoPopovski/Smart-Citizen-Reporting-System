@@ -27,8 +27,19 @@ export interface AnalyticsSummary {
   resolutionRate: number;
 }
 
+export interface CategoryRatingAvg {
+  category_id: number;
+  category_name: string;
+  average_stars: number;
+  ratings_count: number;
+}
+
 export function fetchAnalyticsSummary(): Promise<AnalyticsSummary> {
   return apiFetch<AnalyticsSummary>("/analytics/summary");
+}
+
+export function fetchCategoryRatings(): Promise<CategoryRatingAvg[]> {
+  return apiFetch<CategoryRatingAvg[]>("/analytics/ratings");
 }
 
 export async function exportToCsv() {

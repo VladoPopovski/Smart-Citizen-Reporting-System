@@ -1,0 +1,158 @@
+name: Deploy to Azure
+
+on:
+  push:
+    branches: [master, deployment]
+  workflow_dispatch:
+
+env:
+  RESOURCE_GROUP: rg-scrs-demo
+  LOCATION: uksouth                  # student-sub allowed
+  ACA_ENV: scrs-env
+  BACKEND_NAME: scrs-api
+  FRONTEND_NAME: scrs-web
+  BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/scrs-api
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/scrs-web
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      backend_tag: ${{ steps.tags.outputs.backend }}
+      frontend_tag: ${{ steps.tags.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: tags
+        run: |
+          SHA=${GITHUB_SHA::7}
+          BE=$(echo "$BACKEND_IMAGE" | tr '[:upper:]' '[:lower:]')
+          FE=$(echo "$FRONTEND_IMAGE" | tr '[:upper:]' '[:lower:]')
+          echo "backend=${BE}:${SHA}" >>"$GITHUB_OUTPUT"
+          echo "frontend=${FE}:${SHA}" >>"$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.tags.outputs.backend }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: ${{ steps.tags.outputs.frontend }}
+          build-args: |
+            VITE_SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+            VITE_SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Ensure RG + ACA env
+        run: |
+          az group create -n "$RESOURCE_GROUP" -l "$LOCATION" -o none
+          az containerapp env show -n "$ACA_ENV" -g "$RESOURCE_GROUP" -o none 2>/dev/null \
+            || az containerapp env create -n "$ACA_ENV" -g "$RESOURCE_GROUP" -l "$LOCATION" -o none
+
+      - name: GHCR pull credentials for ACA
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        run: |
+          # If your GHCR packages are public, skip this block.
+          # If private, set GHCR_PULL_TOKEN secret to a PAT with read:packages.
+          echo "GHCR_REG_ARGS=--registry-server ghcr.io --registry-username ${{ github.actor }} --registry-password $GHCR_TOKEN" >>"$GITHUB_ENV"
+          if [ -z "$GHCR_TOKEN" ]; then echo "GHCR_REG_ARGS=" >>"$GITHUB_ENV"; fi
+
+      - name: Deploy backend (internal ingress)
+        env:
+          IMAGE: ${{ needs.build.outputs.backend_tag }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if az containerapp show -n "$BACKEND_NAME" -g "$RESOURCE_GROUP" -o none 2>/dev/null; then
+            az containerapp update -n "$BACKEND_NAME" -g "$RESOURCE_GROUP" --image "$IMAGE" -o none
+          else
+            az containerapp create \
+              -n "$BACKEND_NAME" -g "$RESOURCE_GROUP" \
+              --environment "$ACA_ENV" \
+              --image "$IMAGE" \
+              $GHCR_REG_ARGS \
+              --target-port 8000 --ingress internal \
+              --min-replicas 0 --max-replicas 1 \
+              --cpu 0.5 --memory 1.0Gi \
+              --secrets \
+                database-url="$DATABASE_URL" \
+                supabase-url="$SUPABASE_URL" \
+                supabase-anon-key="$SUPABASE_ANON_KEY" \
+              --env-vars \
+                DATABASE_URL=secretref:database-url \
+                SUPABASE_URL=secretref:supabase-url \
+                SUPABASE_ANON_KEY=secretref:supabase-anon-key \
+                AI_ENABLED=false \
+                AI_PRELOAD_ON_STARTUP=false \
+                DEV_SKIP_AUTH=false \
+                SUPABASE_MOCK_VERIFY=false \
+              -o none
+          fi
+
+      - name: Resolve backend internal FQDN
+        id: be
+        run: |
+          FQDN=$(az containerapp show -n "$BACKEND_NAME" -g "$RESOURCE_GROUP" \
+                  --query 'properties.configuration.ingress.fqdn' -o tsv)
+          echo "fqdn=$FQDN" >>"$GITHUB_OUTPUT"
+          echo "Backend FQDN: $FQDN"
+
+      - name: Deploy frontend (external ingress)
+        env:
+          IMAGE: ${{ needs.build.outputs.frontend_tag }}
+          BACKEND_FQDN: ${{ steps.be.outputs.fqdn }}
+        run: |
+          if az containerapp show -n "$FRONTEND_NAME" -g "$RESOURCE_GROUP" -o none 2>/dev/null; then
+            az containerapp update -n "$FRONTEND_NAME" -g "$RESOURCE_GROUP" \
+              --image "$IMAGE" \
+              --set-env-vars "BACKEND_FQDN=$BACKEND_FQDN" \
+              -o none
+          else
+            az containerapp create \
+              -n "$FRONTEND_NAME" -g "$RESOURCE_GROUP" \
+              --environment "$ACA_ENV" \
+              --image "$IMAGE" \
+              $GHCR_REG_ARGS \
+              --target-port 8080 --ingress external \
+              --min-replicas 0 --max-replicas 1 \
+              --cpu 0.25 --memory 0.5Gi \
+              --env-vars "BACKEND_FQDN=$BACKEND_FQDN" \
+              -o none
+          fi
+
+      - name: Print public URL
+        run: |
+          az containerapp show -n "$FRONTEND_NAME" -g "$RESOURCE_GROUP" \
+            --query 'properties.configuration.ingress.fqdn' -o tsv

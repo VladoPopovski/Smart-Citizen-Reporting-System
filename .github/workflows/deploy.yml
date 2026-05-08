@@ -13,6 +13,9 @@ env:
   FRONTEND_NAME: scrs-web
   BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/scrs-api
   FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/scrs-web
+  # Azure Files share for persistent backend uploads.
+  STORAGE_SHARE: uploads
+  STORAGE_NAME: uploads
 
 permissions:
   contents: read
@@ -73,43 +76,136 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Ensure RG + ACA env
+      - uses: actions/checkout@v4
+
+      - name: Install containerapp CLI extension
+        run: az extension add --name containerapp --upgrade -y
+
+      - name: Apply DB schema patches (idempotent)
+        env:
+          DATABASE_DIRECT_URL: ${{ secrets.DATABASE_DIRECT_URL }}
+        run: |
+          # The app has no migration tooling, so deploys must apply additive
+          # schema changes themselves. Direct URI (port 5432) is required —
+          # the pooled URI (6543) drops session state and breaks DDL.
+          if [ -z "$DATABASE_DIRECT_URL" ]; then
+            echo "::warning::DATABASE_DIRECT_URL not set; skipping schema patch."
+            echo "::warning::Run scripts/migrate.sql manually before the new image rolls out."
+            exit 0
+          fi
+          psql "$DATABASE_DIRECT_URL" -v ON_ERROR_STOP=1 -f scripts/migrate.sql
+
+      - name: Ensure resource group + ACA env
         run: |
           az group create -n "$RESOURCE_GROUP" -l "$LOCATION" -o none
           az containerapp env show -n "$ACA_ENV" -g "$RESOURCE_GROUP" -o none 2>/dev/null \
             || az containerapp env create -n "$ACA_ENV" -g "$RESOURCE_GROUP" -l "$LOCATION" -o none
 
-      - name: GHCR pull credentials for ACA
+      - name: Resolve ACA env default domain
+        id: env_domain
+        run: |
+          DOMAIN=$(az containerapp env show -n "$ACA_ENV" -g "$RESOURCE_GROUP" \
+                    --query 'properties.defaultDomain' -o tsv)
+          echo "domain=$DOMAIN" >>"$GITHUB_OUTPUT"
+
+      - name: Ensure storage account + file share for uploads
+        id: storage
+        run: |
+          # Storage account names: 3-24 chars, lowercase letters/digits only.
+          # Derive a deterministic name from the repo id so re-runs reuse the same account.
+          STORAGE_ACCT="scrsup$(printf '%s' "${{ github.repository_id }}" | tr -dc 'a-z0-9' | head -c 18)"
+          echo "Storage account: $STORAGE_ACCT"
+          az storage account show -n "$STORAGE_ACCT" -g "$RESOURCE_GROUP" -o none 2>/dev/null \
+            || az storage account create -n "$STORAGE_ACCT" -g "$RESOURCE_GROUP" -l "$LOCATION" \
+                 --sku Standard_LRS --kind StorageV2 -o none
+          az storage share-rm show --resource-group "$RESOURCE_GROUP" \
+              --storage-account "$STORAGE_ACCT" --name "$STORAGE_SHARE" -o none 2>/dev/null \
+            || az storage share-rm create --resource-group "$RESOURCE_GROUP" \
+                 --storage-account "$STORAGE_ACCT" --name "$STORAGE_SHARE" --quota 5 -o none
+          KEY=$(az storage account keys list -g "$RESOURCE_GROUP" -n "$STORAGE_ACCT" \
+                  --query '[0].value' -o tsv)
+          az containerapp env storage set \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$ACA_ENV" \
+            --storage-name "$STORAGE_NAME" \
+            --azure-file-account-name "$STORAGE_ACCT" \
+            --azure-file-account-key "$KEY" \
+            --azure-file-share-name "$STORAGE_SHARE" \
+            --access-mode ReadWrite -o none
+
+      - name: GHCR pull credentials
         env:
           GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
         run: |
-          # If your GHCR packages are public, skip this block.
-          # If private, set GHCR_PULL_TOKEN secret to a PAT with read:packages.
-          echo "GHCR_REG_ARGS=--registry-server ghcr.io --registry-username ${{ github.actor }} --registry-password $GHCR_TOKEN" >>"$GITHUB_ENV"
-          if [ -z "$GHCR_TOKEN" ]; then echo "GHCR_REG_ARGS=" >>"$GITHUB_ENV"; fi
+          # If GHCR packages are public, leave GHCR_PULL_TOKEN unset; ACA will pull anonymously.
+          if [ -n "$GHCR_TOKEN" ]; then
+            {
+              echo "GHCR_REG_ARGS=--registry-server ghcr.io --registry-username ${{ github.actor }} --registry-password $GHCR_TOKEN"
+              echo "GHCR_REG_USER=${{ github.actor }}"
+              echo "GHCR_REG_PASS=$GHCR_TOKEN"
+            } >>"$GITHUB_ENV"
+          else
+            echo "GHCR_REG_ARGS=" >>"$GITHUB_ENV"
+          fi
 
-      - name: Deploy backend (internal ingress)
+      - name: Deploy backend (internal ingress, persistent uploads)
         env:
           IMAGE: ${{ needs.build.outputs.backend_tag }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          # SMTP_* are optional. When unset, app/services/email_service.py
+          # logs a warning and skips the send — feature degrades gracefully.
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          ENV_DOMAIN: ${{ steps.env_domain.outputs.domain }}
         run: |
-          if az containerapp show -n "$BACKEND_NAME" -g "$RESOURCE_GROUP" -o none 2>/dev/null; then
-            az containerapp update -n "$BACKEND_NAME" -g "$RESOURCE_GROUP" --image "$IMAGE" -o none
-          else
+          # CORS regex permits any sibling Container App in this env (frontend FQDN)
+          # without a chicken-and-egg redeploy.
+          CORS_REGEX="^https://[a-z0-9-]+\\.${ENV_DOMAIN//./\\.}$"
+
+          # Build optional SMTP secret/env pairs only when secrets are configured,
+          # so we don't push empty strings into the container app definition.
+          SMTP_SECRETS=()
+          SMTP_ENVS=()
+          if [ -n "$SMTP_HOST" ]; then
+            SMTP_SECRETS+=("smtp-host=$SMTP_HOST")
+            SMTP_ENVS+=("SMTP_HOST=secretref:smtp-host")
+          fi
+          if [ -n "$SMTP_USER" ]; then
+            SMTP_SECRETS+=("smtp-user=$SMTP_USER")
+            SMTP_ENVS+=("SMTP_USER=secretref:smtp-user")
+          fi
+          if [ -n "$SMTP_PASSWORD" ]; then
+            SMTP_SECRETS+=("smtp-password=$SMTP_PASSWORD")
+            SMTP_ENVS+=("SMTP_PASSWORD=secretref:smtp-password")
+          fi
+          if [ -n "$SMTP_FROM" ]; then
+            SMTP_SECRETS+=("smtp-from=$SMTP_FROM")
+            SMTP_ENVS+=("SMTP_FROM=secretref:smtp-from")
+          fi
+          # SMTP_PORT is non-secret; pass directly when set, else fall back to backend default (587).
+          if [ -n "$SMTP_PORT" ]; then
+            SMTP_ENVS+=("SMTP_PORT=$SMTP_PORT")
+          fi
+
+          if ! az containerapp show -n "$BACKEND_NAME" -g "$RESOURCE_GROUP" -o none 2>/dev/null; then
             az containerapp create \
               -n "$BACKEND_NAME" -g "$RESOURCE_GROUP" \
               --environment "$ACA_ENV" \
               --image "$IMAGE" \
               $GHCR_REG_ARGS \
               --target-port 8000 --ingress internal \
-              --min-replicas 0 --max-replicas 1 \
+              --min-replicas 1 --max-replicas 1 \
               --cpu 0.5 --memory 1.0Gi \
               --secrets \
                 database-url="$DATABASE_URL" \
                 supabase-url="$SUPABASE_URL" \
                 supabase-anon-key="$SUPABASE_ANON_KEY" \
+                "${SMTP_SECRETS[@]}" \
               --env-vars \
                 DATABASE_URL=secretref:database-url \
                 SUPABASE_URL=secretref:supabase-url \
@@ -118,8 +214,64 @@ jobs:
                 AI_PRELOAD_ON_STARTUP=false \
                 DEV_SKIP_AUTH=false \
                 SUPABASE_MOCK_VERIFY=false \
+                BACKEND_CORS_ORIGIN_REGEX="$CORS_REGEX" \
+                "${SMTP_ENVS[@]}" \
+              -o none
+          else
+            # Refresh registry creds (no-op when GHCR is public).
+            if [ -n "$GHCR_REG_USER" ]; then
+              az containerapp registry set -n "$BACKEND_NAME" -g "$RESOURCE_GROUP" \
+                --server ghcr.io --username "$GHCR_REG_USER" --password "$GHCR_REG_PASS" -o none
+            fi
+            # Refresh secrets (set replaces; use --replace-env-vars semantics for env block).
+            az containerapp secret set -n "$BACKEND_NAME" -g "$RESOURCE_GROUP" \
+              --secrets \
+                database-url="$DATABASE_URL" \
+                supabase-url="$SUPABASE_URL" \
+                supabase-anon-key="$SUPABASE_ANON_KEY" \
+                "${SMTP_SECRETS[@]}" \
+              -o none
+            az containerapp update -n "$BACKEND_NAME" -g "$RESOURCE_GROUP" \
+              --image "$IMAGE" \
+              --min-replicas 1 --max-replicas 1 \
+              --replace-env-vars \
+                DATABASE_URL=secretref:database-url \
+                SUPABASE_URL=secretref:supabase-url \
+                SUPABASE_ANON_KEY=secretref:supabase-anon-key \
+                AI_ENABLED=false \
+                AI_PRELOAD_ON_STARTUP=false \
+                DEV_SKIP_AUTH=false \
+                SUPABASE_MOCK_VERIFY=false \
+                BACKEND_CORS_ORIGIN_REGEX="$CORS_REGEX" \
+                "${SMTP_ENVS[@]}" \
               -o none
           fi
+
+      - name: Mount uploads volume on backend
+        run: |
+          # Patch the container app YAML to add volume + volumeMount for /app/uploads.
+          # Idempotent: yq sets the same shape every run.
+          # mountOptions force uid 1000 so the non-root `appuser` (Dockerfile)
+          # has write access to the SMB-mounted Azure Files share.
+          TMP=$(mktemp -d)
+          az containerapp show -n "$BACKEND_NAME" -g "$RESOURCE_GROUP" -o yaml > "$TMP/app.yaml"
+          yq -i '
+            del(.id, .systemData, .properties.provisioningState, .properties.eventStreamEndpoint,
+                .properties.outboundIpAddresses, .properties.runningStatus,
+                .properties.latestRevisionFqdn, .properties.latestRevisionName,
+                .properties.latestReadyRevisionName, .properties.customDomainVerificationId)
+            | .properties.template.volumes = [{
+              "name": "uploads",
+              "storageType": "AzureFile",
+              "storageName": strenv(STORAGE_NAME),
+              "mountOptions": "uid=1000,gid=1000,dir_mode=0775,file_mode=0664"
+            }]
+            | .properties.template.containers[0].volumeMounts = [{
+              "volumeName": "uploads",
+              "mountPath": "/app/uploads"
+            }]
+          ' "$TMP/app.yaml"
+          az containerapp update -n "$BACKEND_NAME" -g "$RESOURCE_GROUP" --yaml "$TMP/app.yaml" -o none
 
       - name: Resolve backend internal FQDN
         id: be
@@ -134,12 +286,7 @@ jobs:
           IMAGE: ${{ needs.build.outputs.frontend_tag }}
           BACKEND_FQDN: ${{ steps.be.outputs.fqdn }}
         run: |
-          if az containerapp show -n "$FRONTEND_NAME" -g "$RESOURCE_GROUP" -o none 2>/dev/null; then
-            az containerapp update -n "$FRONTEND_NAME" -g "$RESOURCE_GROUP" \
-              --image "$IMAGE" \
-              --set-env-vars "BACKEND_FQDN=$BACKEND_FQDN" \
-              -o none
-          else
+          if ! az containerapp show -n "$FRONTEND_NAME" -g "$RESOURCE_GROUP" -o none 2>/dev/null; then
             az containerapp create \
               -n "$FRONTEND_NAME" -g "$RESOURCE_GROUP" \
               --environment "$ACA_ENV" \
@@ -149,6 +296,15 @@ jobs:
               --min-replicas 0 --max-replicas 1 \
               --cpu 0.25 --memory 0.5Gi \
               --env-vars "BACKEND_FQDN=$BACKEND_FQDN" \
+              -o none
+          else
+            if [ -n "$GHCR_REG_USER" ]; then
+              az containerapp registry set -n "$FRONTEND_NAME" -g "$RESOURCE_GROUP" \
+                --server ghcr.io --username "$GHCR_REG_USER" --password "$GHCR_REG_PASS" -o none
+            fi
+            az containerapp update -n "$FRONTEND_NAME" -g "$RESOURCE_GROUP" \
+              --image "$IMAGE" \
+              --replace-env-vars "BACKEND_FQDN=$BACKEND_FQDN" \
               -o none
           fi
 

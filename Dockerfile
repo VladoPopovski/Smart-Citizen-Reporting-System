@@ -9,6 +9,14 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# fonts-dejavu-core ships DejaVuSans{,−Bold}.ttf at the path
+# app/routers/{reports,analytics}.py probes for Cyrillic PDF rendering.
+# Without it, the export falls back to Helvetica and Macedonian glyphs render
+# as black squares.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install Python deps in their own layer so they cache when only app code changes.
 COPY requirements.txt .
 RUN pip install -r requirements.txt

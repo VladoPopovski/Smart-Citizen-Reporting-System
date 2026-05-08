@@ -1,0 +1,32 @@
+# Dependencies / build output (regenerated inside the image)
+node_modules/
+dist/
+build/
+.vite/
+
+# Local env / secrets — never bake into images
+.env
+.env.*
+!.env.example
+
+# Test artifacts
+playwright-report/
+test-results/
+coverage/
+.nyc_output/
+
+# Caches
+.cache/
+.eslintcache
+.parcel-cache/
+.turbo/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# VCS
+.git/
+.gitignore

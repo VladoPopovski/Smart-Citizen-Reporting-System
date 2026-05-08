@@ -1,6 +1,7 @@
 from functools import lru_cache
 from uuid import UUID
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -71,6 +72,20 @@ class Settings(BaseSettings):
     ai_hf_inference_model: str = "mistralai/Mistral-7B-Instruct-v0.2"
     ai_hf_inference_timeout_seconds: float = 30.0
     hf_api_token: str | None = None  # optional — raises free rate limit
+
+    @field_validator("backend_cors_origins", mode="before")
+    @classmethod
+    def _split_cors_origins(cls, value: object) -> object:
+        # Allow BACKEND_CORS_ORIGINS to be set as a comma-separated string
+        # in deployment env vars, not just a JSON array.
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return []
+            if stripped.startswith("["):
+                return value  # let pydantic parse JSON
+            return [item.strip() for item in stripped.split(",") if item.strip()]
+        return value
 
 
 @lru_cache
